@@ -55,6 +55,17 @@ def build_parser() -> argparse.ArgumentParser:
     _add_common(ex)
     ex.add_argument("--out", default="descriptions.json")
 
+    doc = sub.add_parser("doctor", help="verify dependencies & environment health")
+    doc.add_argument("--blip-model", default="Salesforce/blip-image-captioning-base")
+
+    ver = sub.add_parser("verify-db", help="assert a produced DB is sound & correct")
+    _add_common(ver)
+    ver.add_argument("--dataroot", help="dataset root, to cross-check scene coverage")
+    ver.add_argument("--version", default="v1.0-mini")
+    ver.add_argument("--no-file-check", action="store_true",
+                     help="skip image-file existence (e.g. paths not mounted here)")
+    ver.add_argument("--vocab-fraction", type=float, default=0.5)
+
     return parser
 
 
@@ -114,12 +125,36 @@ def _cmd_export(cfg: Config, out_path: str) -> int:
     return 0
 
 
+def _cmd_doctor(model_name: str) -> int:
+    from vlm_project import doctor
+
+    return doctor.main(model_name)
+
+
+def _cmd_verify_db(cfg: Config, args: argparse.Namespace) -> int:
+    from vlm_project.acceptance import verify_db
+
+    report = verify_db(
+        db_path=cfg.db_path,
+        dataroot=args.dataroot,
+        version=args.version,
+        check_files=not args.no_file_check,
+        vocab_fraction=args.vocab_fraction,
+    )
+    print(report.render())
+    return 0 if report.ok else 1
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     logging.basicConfig(
-        level=logging.INFO if args.verbose else logging.WARNING,
+        level=logging.INFO if getattr(args, "verbose", False) else logging.WARNING,
         format="%(message)s",
     )
+
+    if args.command == "doctor":
+        return _cmd_doctor(args.blip_model)
+
     cfg = _config_from(args)
 
     if args.command == "ingest":
@@ -128,6 +163,8 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_query(cfg, args.text, args.limit, args.json)
     if args.command == "export-json":
         return _cmd_export(cfg, args.out)
+    if args.command == "verify-db":
+        return _cmd_verify_db(cfg, args)
     return 1
 
 

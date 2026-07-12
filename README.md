@@ -9,6 +9,30 @@
 > archive. Three things are configurable: the **dataset** (loader), how **keyframes** are chosen
 > (single frame vs. clustering), and the **VLM backend** (local BLIP by default, or an API model).
 
+![Real nuScenes v1.0-mini front-camera keyframes with the BLIP captions this tool produced](docs/assets/nuscenes_captions.png)
+
+*The image above is a genuine artifact of a real run — the actual `CAM_FRONT` keyframes of all 10
+nuScenes v1.0-mini scenes with the exact BLIP captions this pipeline wrote to the database. Regenerate
+it any time with `python scripts/make_readme_assets.py`.*
+
+## What you get, on real data
+
+A single `ingest` over nuScenes v1.0-mini produces 10 rows like these (verbatim from a real run):
+
+| scene | BLIP description |
+|---|---|
+| scene-0553 | a group of people walking across a crosswalk |
+| scene-1077 | a car driving down the road at night |
+| scene-0103 | the cars are parked on the street |
+| scene-0916 | trees on the side of the road |
+| scene-0796 | the road is empty |
+| scene-1100 | a car is parked on the side of the road at night |
+
+With `--selector clusters`, a single ~20 s clip is split into a few temporally-distinct sub-scenes,
+each captioned from its representative frame:
+
+![Clustering scene-0061 into three sub-scenes](docs/assets/clustering_example.png)
+
 ```
         your clips                         vlm-project ingest
    ┌───────────────────┐              ┌──────────────────────────────┐
@@ -31,36 +55,43 @@
 
 ---
 
-## Quickstart (Docker — nothing to install but Docker)
+## Installation & quickstart
+
+### Option A — Docker (standalone, recommended)
+
+Nothing to install but Docker. The image bundles the app, CPU-only PyTorch, and the BLIP weights
+(baked at build time), so it runs fully offline. The dataset and outputs are mounted at run time.
 
 ```bash
-# Build once. This bakes the ~0.5 GB BLIP weights into the image,
-# so runs need no network and CPU-only torch keeps the image lean.
+# Build once (~a few minutes; downloads CPU torch + ~0.5 GB BLIP weights into the image).
 docker build -t vlm-project .
 
-# 1) Ingest: caption a representative frame of every nuScenes scene into the DB.
-#    Mount your dataset read-only and an output dir for the DB.
+# Verify the image is healthy (deps + baked weights + FTS5).
+docker run --rm vlm-project doctor
+
+# Ingest: caption a representative frame of every nuScenes scene into a searchable DB.
 docker run --rm \
   -v /path/to/nuscenes:/data:ro \
   -v "$PWD/out:/out" \
   -e DATAROOT=/data -e DB=/out/scenes.db \
   vlm-project ingest -v
 
-# 2) Query: full-text search the descriptions.
+# Search the descriptions.
 docker run --rm -v "$PWD/out:/out" -e DB=/out/scenes.db \
   vlm-project query "pedestrian crossing"
 
-# 3) Export everything to JSON if you prefer a flat file.
+# Export to a flat JSON file if you prefer.
 docker run --rm -v "$PWD/out:/out" -e DB=/out/scenes.db \
   vlm-project export-json --out /out/descriptions.json
 ```
 
-The output `out/scenes.db` is a normal SQLite file — open it in any SQLite browser, copy it, or ship
-it. There is no server and no daemon: each command runs a job and exits.
+`out/scenes.db` is an ordinary SQLite file — open it in any SQLite browser, copy it, or ship it.
+Each command runs a job and exits; there is no server or daemon.
 
-## Quickstart (local, for development)
+### Option B — local Python (for development)
 
 ```bash
+python -m venv .venv && . .venv/bin/activate      # Windows: .venv\Scripts\Activate.ps1
 pip install -e ".[dev]"
 
 # Full unit suite — no dataset, no model download, runs in seconds.
@@ -71,15 +102,15 @@ vlm-project ingest --dataroot ./data --db ./out/scenes.db -v
 vlm-project query "truck" --db ./out/scenes.db
 ```
 
-## Getting the dataset
+### Getting the dataset
 
-Download **nuScenes v1.0-mini** (~4 GB) from <https://www.nuscenes.org/download> (free account /
-EULA) and extract it so the root directly contains `samples/ sweeps/ maps/ v1.0-mini/`. That root is
-your `DATAROOT`. The dataset is **not** included in this repo or the image — it is mounted at runtime.
+Download **nuScenes v1.0-mini** (~4 GB) and extract it so the root directly contains
+`samples/ sweeps/ maps/ v1.0-mini/`. That root is your `DATAROOT`. It is **not** bundled in the image
+or repo. The production acceptance script (below) can fetch it for you.
 
 ## Configuration
 
-Everything is set by env var (the container's contract) or the matching CLI flag (which wins):
+Set by env var (the container's contract) or the matching CLI flag (which wins):
 
 | Concern | Env var | CLI flag | Default | Values |
 |---|---|---|---|---|
@@ -92,8 +123,6 @@ Everything is set by env var (the container's contract) or the matching CLI flag
 | VLM backend | `VLM_BACKEND` | `--backend` | `blip` | `blip`, `fake`, `anthropic`, `openai` |
 | Database path | `DB` | `--db` | `./out/scenes.db` | any path |
 
-### Handy variations
-
 ```bash
 # Multi-scene: segment each clip into a few sub-scenes (scene-0061#0, #1, ...)
 docker run --rm -v /path/to/nuscenes:/data:ro -v "$PWD/out:/out" \
@@ -102,15 +131,11 @@ docker run --rm -v /path/to/nuscenes:/data:ro -v "$PWD/out:/out" \
 # Any image folder — the container is dataset-agnostic.
 docker run --rm -v /path/to/pics:/data:ro -v "$PWD/out:/out" \
   -e LOADER=imagefolder -e DATAROOT=/data vlm-project ingest -v
-
-# A better single-frame pick (least motion blur).
-vlm-project ingest --single-strategy sharpest --dataroot ./data
 ```
 
-> **Tuning clustering.** The cut point is an absolute cosine distance between
-> consecutive frames' BLIP embeddings. Those embeddings are highly concentrated
-> — in a synthetic clip, a hard scene cut measures ~0.08 and within-scene frames
-> ~0.00 — so the default (`0.05`) is deliberately small. Raise it to merge more
+> **Tuning clustering.** The cut point is an absolute cosine distance between consecutive frames'
+> BLIP embeddings. Those embeddings are highly concentrated (a hard scene cut measures ~0.08 and
+> within-scene frames ~0.00), so the default (`0.05`) is deliberately small. Raise it to merge more
 > aggressively, lower it to split more finely; it is dataset-dependent.
 
 ## How it works
@@ -125,7 +150,9 @@ vlm-project ingest --single-strategy sharpest --dataroot ./data
 
 Concrete classes are assembled from config in exactly one place, `factory.py`.
 
-## Testing
+## Testing & CI/CD
+
+Three layers, fast to slow:
 
 ```bash
 pytest                 # unit suite: no dataset, no model, no network (fast)
@@ -133,13 +160,46 @@ pytest -m integration  # opt-in: loads real BLIP and captions one image (~0.5 GB
 ruff check src tests   # lint
 ```
 
-- **Dependency injection** lets the whole pipeline run against a `FakeBackend` and a fake `NuScenes`
-  stand-in (a short `next`-linked keyframe chain built in `tests/conftest.py`) — no 4 GB dataset, no
-  weights. Tiny JPEGs are generated on the fly with Pillow.
-- **Selectors** are tested with scripted embeddings, so clustering logic is verified deterministically
-  without BLIP.
-- **Store** has an FTS5 round-trip test and an idempotent-upsert test.
-- **API backends** are tested with a mocked client — never a real call.
+- **Unit** — dependency injection lets the whole pipeline run against a `FakeBackend` and a fake
+  `NuScenes` stand-in; selectors run on scripted embeddings; the store has an FTS5 round-trip test;
+  the acceptance checks are themselves unit-tested. No 4 GB dataset, no weights.
+- **Integration** — one opt-in test loads real BLIP end to end.
+- **Production acceptance** — the real-data gate (below).
+
+### Production acceptance test
+
+One command builds/installs the app, verifies dependencies, obtains the **real** nuScenes v1.0-mini
+dataset, ingests real clips end to end (single-frame **and** clustering), asserts the results are
+sound, and runs a search — exit code `0` means production-ready.
+
+```bash
+# Linux / macOS / CI
+./scripts/test_vlm_app_production.sh                 # docker mode (needs a running daemon)
+ACCEPTANCE_MODE=local ./scripts/test_vlm_app_production.sh   # no Docker, uses the venv
+
+# Windows
+./scripts/test_vlm_app_production.ps1 -Mode local
+```
+
+The correctness assertions (`vlm-project verify-db`, backed by `src/vlm_project/acceptance.py`) go
+beyond "it ran":
+
+- **scene coverage** — the produced rows cover exactly the dataset's scenes (cross-checked against
+  `v1.0-mini/scene.json`).
+- **well-formed descriptions** — every caption is non-empty, multi-word, printable.
+- **image files exist** — every `image_path` resolves on disk.
+- **FTS round-trip** — a distinctive word from each caption finds its own row via search.
+- **driving vocabulary** — a healthy fraction of captions mention driving-relevant terms (road,
+  street, car, pedestrian, …), a soundness signal that BLIP actually described driving scenes.
+- **timings** — inference time is positive and bounded.
+
+### GitHub Actions (`.github/workflows/ci.yml`)
+
+| Job | Trigger | What it proves |
+|---|---|---|
+| `lint-and-unit` | every push / PR | ruff + full unit suite, installed without the heavy ML deps → fast. |
+| `docker-smoke` | every push / PR | image builds, `doctor` is healthy, a fake-backend ingest+query works **without** the dataset. |
+| `nuscenes-e2e` | manual (`workflow_dispatch`) | full production acceptance on the **real** 4 GB dataset (cached), uploading the produced `.db` files as artifacts. |
 
 ## Deployment
 
@@ -168,10 +228,13 @@ It is a **CLI batch job**, and that job is the deployment unit:
 
 ```
 src/vlm_project/
-  config.py      models.py      store.py      pipeline.py     factory.py     cli.py
+  config.py    models.py    store.py     pipeline.py   factory.py   cli.py
+  acceptance.py  doctor.py
   dataset/   nuscenes_loader · imagefolder_loader · video_loader
   selectors/ single · clusters
   vlm/       blip · fake · api
-tests/         loaders · selectors · store · pipeline · cli · api · integration
+scripts/   production_acceptance.py · test_vlm_app_production.{sh,ps1} · make_readme_assets.py · bake_weights.py
+tests/     loaders · selectors · store · pipeline · cli · api · acceptance · integration
+.github/workflows/ci.yml
 Dockerfile · docker-compose.yml · Makefile · pyproject.toml · requirements.lock
 ```

@@ -1,0 +1,85 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:      # allows manually triggering the gated E2E job
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Fast gate: lint + unit tests. Installs the package WITHOUT the heavy ML deps
+  # (the unit suite is designed to need none), so this stays quick on every push.
+  # ---------------------------------------------------------------------------
+  lint-and-unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install (no heavy deps) + test tooling
+        run: |
+          python -m pip install --upgrade pip
+          pip install --no-deps -e .
+          pip install numpy Pillow pytest pytest-mock ruff
+      - name: Lint
+        run: ruff check src tests
+      - name: Unit tests
+        run: pytest -m "not integration" -q
+
+  # ---------------------------------------------------------------------------
+  # Build the container and smoke-test it WITHOUT the 4 GB dataset:
+  # doctor (deps healthy) + a fake-backend ingest/query on a generated image.
+  # ---------------------------------------------------------------------------
+  docker-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image
+        run: docker build -t vlm-project .
+      - name: doctor (dependency health inside the image)
+        run: docker run --rm vlm-project doctor
+      - name: Fake-backend ingest + query (no dataset needed)
+        run: |
+          mkdir -p out imgs
+          python - <<'PY'
+          from PIL import Image
+          for i in range(3):
+              Image.new("RGB", (48, 36), (i*60, 40, 90)).save(f"imgs/img{i}.jpg")
+          PY
+          docker run --rm -v "$PWD/imgs:/imgs:ro" -v "$PWD/out:/out" \
+            -e LOADER=imagefolder -e DATAROOT=/imgs -e DB=/out/s.db \
+            vlm-project ingest -v
+          docker run --rm -v "$PWD/out:/out" -e DB=/out/s.db vlm-project query image
+
+  # ---------------------------------------------------------------------------
+  # Full production acceptance on the REAL nuScenes v1.0-mini dataset.
+  # Gated (manual / scheduled) because it downloads ~4 GB and runs BLIP.
+  # This is the CD-grade "is it actually correct on real data?" gate.
+  # ---------------------------------------------------------------------------
+  nuscenes-e2e:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch'
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Cache nuScenes v1.0-mini
+        id: cache-nusc
+        uses: actions/cache@v4
+        with:
+          path: ~/nuscenes
+          key: nuscenes-v1.0-mini
+      - name: Build image
+        run: docker build -t vlm-project .
+      - name: Production acceptance (docker mode, real dataset)
+        run: bash scripts/test_vlm_app_production.sh --mode docker --skip-build
+        env:
+          NUSCENES_DIR: /home/runner/nuscenes
+      - name: Upload produced databases
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scene-databases
+          path: out/*.db
