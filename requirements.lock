@@ -1,0 +1,13 @@
+# Pinned runtime dependencies for reproducible Docker builds (default local-BLIP path).
+#
+# torch is installed from the CPU-only wheel index in the Dockerfile
+# (--index-url https://download.pytorch.org/whl/cpu) so no CUDA is pulled.
+#
+# Regenerate with:  pip install -e . && pip freeze > requirements.lock
+# (kept hand-curated here to the direct deps that matter for the image).
+
+nuscenes-devkit==1.1.11
+transformers==4.44.2
+torch==2.4.1
+Pillow==10.4.0
+numpy==1.26.4

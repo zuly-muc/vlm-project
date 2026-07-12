@@ -1,0 +1,28 @@
+# Dataset (mounted at runtime, never committed)
+data/
+*.tgz
+
+# Outputs
+out/
+*.db
+*.db-*
+descriptions.json
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+
+# Model / HF caches
+.cache/
+hf_cache/
+
+# Tooling
+.pytest_cache/
+.ruff_cache/
+.coverage

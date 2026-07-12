@@ -1,0 +1,11 @@
+# Normalize line endings to LF so the code runs correctly in the Linux
+# container regardless of the host OS that checked it out.
+* text=auto eol=lf
+
+# Binary types that must never be line-ending converted.
+*.jpg binary
+*.jpeg binary
+*.png binary
+*.mp4 binary
+*.db binary
+*.tgz binary

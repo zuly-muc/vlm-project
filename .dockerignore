@@ -1,0 +1,16 @@
+data/
+out/
+*.db
+*.db-*
+descriptions.json
+.git/
+.gitignore
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+tests/
+.github/

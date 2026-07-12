@@ -1,0 +1,27 @@
+# Convenience wiring for local runs. Set NUSCENES_DIR to your dataset root.
+#
+#   NUSCENES_DIR=/path/to/nuscenes docker compose run --rm ingest
+#   docker compose run --rm query "pedestrian crossing"
+#
+services:
+  ingest:
+    build: .
+    image: vlm-project
+    environment:
+      LOADER: "${LOADER:-nuscenes}"
+      DATAROOT: /data
+      DB: /out/scenes.db
+    volumes:
+      - "${NUSCENES_DIR:-./data}:/data:ro"
+      - "./out:/out"
+    command: ["ingest"]
+
+  query:
+    image: vlm-project
+    volumes:
+      - "./out:/out"
+    environment:
+      DB: /out/scenes.db
+    # Pass the search text on the command line:
+    #   docker compose run --rm query query "trucks at night"
+    entrypoint: ["vlm-project"]

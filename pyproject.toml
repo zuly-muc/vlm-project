@@ -1,0 +1,56 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vlm-project"
+version = "0.1.0"
+description = "Turn driving footage into a searchable database of scene descriptions using a vision-language model."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = [
+    "nuscenes-devkit>=1.1.11",
+    "transformers>=4.38",
+    "torch>=2.1",
+    "Pillow>=10.0",
+    "numpy>=1.24",
+]
+
+[project.optional-dependencies]
+# Cloud VLM backends (opt-in; not needed for the default local BLIP path).
+api = [
+    "anthropic>=0.25",
+    "openai>=1.20",
+]
+# Optional raw-video loader.
+video = [
+    "opencv-python-headless>=4.8",
+]
+# Development / test tooling.
+dev = [
+    "pytest>=8.0",
+    "pytest-mock>=3.12",
+    "ruff>=0.4",
+]
+
+[project.scripts]
+vlm-project = "vlm_project.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "integration: exercises the real BLIP weights / network; skipped by default in CI",
+]
+# Integration tests are opt-in: run them with `pytest -m integration`.
+addopts = "-m 'not integration'"
+
+[tool.ruff]
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
