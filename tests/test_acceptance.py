@@ -1,4 +1,4 @@
-"""Unit tests for the acceptance verifier — the checks that gate production.
+"""Unit tests for the acceptance verifier, the checks that gate production.
 
 Builds synthetic DBs and a fake scene.json so the verification logic itself is
 proven correct (both the passing and failing paths) without any real dataset.

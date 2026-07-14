@@ -18,14 +18,15 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# Cloud VLM backends (opt-in; not needed for the default local BLIP path).
-api = [
-    "anthropic>=0.25",
-    "openai>=1.20",
-]
 # Optional raw-video loader.
 video = [
     "opencv-python-headless>=4.8",
+]
+# Optional local Moondream2 backend (instruction-following VLM; heavier than
+# BLIP). transformers/torch come from the core deps; these are its extra needs.
+moondream = [
+    "einops>=0.7",
+    "torchvision>=0.16",
 ]
 # Development / test tooling.
 dev = [
@@ -39,6 +40,11 @@ vlm-project = "vlm_project.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+# Ship the committed correctness baseline inside the package so verify-accuracy
+# finds it wherever the image runs (no volume mount needed).
+"vlm_project.baselines" = ["*.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

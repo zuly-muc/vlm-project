@@ -52,3 +52,50 @@ def test_row_shape_matches_scene_description(tmp_path: Path):
         row = store.all()[0]
         assert row["frame_range"] == [0, 0]
         assert row["metadata"] == {"k": "v"}
+
+
+def test_staged_publishes_only_on_finalize(tmp_path: Path):
+    final = tmp_path / "out" / "scenes.db"
+    stage = tmp_path / "stage"
+    store = SceneStore(final, stage_dir=stage)
+    store.upsert(_rec("scene-0001", "a staged row"))
+    # Nothing at the final path yet, writes go to the local stage dir.
+    assert not final.exists()
+
+    store.finalize()
+
+    # After finalize the DB is published to the final path and is queryable.
+    assert final.exists()
+    with SceneStore(final) as reopened:
+        assert reopened.count() == 1
+        assert reopened.search("staged")[0]["scene_id"] == "scene-0001"
+    # Scratch copy is cleaned up.
+    assert not (stage / "scenes.db").exists()
+
+
+def test_staged_context_manager_finalizes_on_clean_exit(tmp_path: Path):
+    final = tmp_path / "out" / "scenes.db"
+    with SceneStore(final, stage_dir=tmp_path / "stage") as store:
+        store.upsert(_rec("scene-0001", "hello"))
+        assert not final.exists()  # not yet published inside the block
+    assert final.exists()  # published on clean __exit__
+
+
+def test_staged_failure_does_not_clobber_existing_db(tmp_path: Path):
+    final = tmp_path / "out" / "scenes.db"
+    # Seed a good existing DB at the final path.
+    with SceneStore(final) as store:
+        store.upsert(_rec("scene-0001", "original good row"))
+
+    # A staged run that raises must leave the existing DB untouched.
+    try:
+        with SceneStore(final, stage_dir=tmp_path / "stage") as store:
+            store.upsert(_rec("scene-0002", "partial row that should not land"))
+            raise RuntimeError("boom mid-run")
+    except RuntimeError:
+        pass
+
+    with SceneStore(final) as reopened:
+        assert reopened.count() == 1
+        assert reopened.search("original")[0]["scene_id"] == "scene-0001"
+        assert reopened.search("partial") == []

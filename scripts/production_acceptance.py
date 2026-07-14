@@ -6,20 +6,22 @@ nuScenes v1.0-mini dataset, ingests real front-camera clips end to end, and then
 asserts the results are sound and correct. Exit code 0 == production-ready.
 
 Two modes (``--mode``):
-  * ``docker`` (default) — builds the image and runs every step inside it, so it
+  * ``docker`` (default): builds the image and runs every step inside it, so it
     validates the shipping artifact exactly as deployed.
-  * ``local``            — runs against the installed package/venv (no Docker),
+  * ``local``: runs against the installed package/venv (no Docker),
     useful for fast iteration and CI where Docker isn't available.
 
 Stages:
-  1. preflight   — docker/python present
-  2. build       — docker build (docker mode)
-  3. doctor      — dependency & environment health
-  4. dataset     — ensure real nuScenes v1.0-mini (download+extract if needed)
-  5. ingest      — real clips -> descriptions DB (single-frame)
-  6. clusters    — real clip segmentation on a subset (multi-scene)
-  7. verify      — correctness assertions on the produced DB
-  8. query       — full-text search returns matches
+  1. preflight: docker/python present
+  2. build: docker build (docker mode)
+  3. doctor: dependency & environment health
+  4. dataset: ensure real nuScenes v1.0-mini (download+extract if needed)
+  5. ingest: real clips -> descriptions DB (single-frame)
+  6. clusters: real clip segmentation on a subset (multi-scene)
+  7. verify: soundness assertions on the produced DB (verify-db)
+  8. query: full-text search returns matches
+  9. accuracy: correctness: object-grounding vs nuScenes GT (verify-accuracy)
+ 10. model-sanity: fetch official COCO micro-set, BLIP BLEU-4 vs floor (skips offline)
 
 Only the standard library is used here so the orchestrator runs anywhere.
 """
@@ -125,11 +127,22 @@ class Runner:
         return ("/out/clusters.db" if self.mode == "docker"
                 else str(self.out_dir / "clusters.db"))
 
-    def vlm(self, args: list[str], *, mount_data: bool = False) -> subprocess.CompletedProcess:
+    def accuracy_path(self) -> str:
+        return ("/out/accuracy.json" if self.mode == "docker"
+                else str(self.out_dir / "accuracy.json"))
+
+    def accuracy_path_clusters(self) -> str:
+        return ("/out/accuracy_clusters.json" if self.mode == "docker"
+                else str(self.out_dir / "accuracy_clusters.json"))
+
+    def vlm(self, args: list[str], *, mount_data: bool = False,
+            mounts: list[tuple[str, str]] | None = None) -> subprocess.CompletedProcess:
         if self.mode == "docker":
             cmd = ["docker", "run", "--rm", "-v", f"{self.out_dir}:/out"]
             if mount_data:
                 cmd += ["-v", f"{self.dataroot}:/data:ro"]
+            for host, container in (mounts or []):
+                cmd += ["-v", f"{host}:{container}:ro"]
             cmd += [self.image] + args
         else:
             # Use the running interpreter's module entrypoint so we don't depend
@@ -142,14 +155,14 @@ class Runner:
 # stages
 # --------------------------------------------------------------------------- #
 def stage_preflight(mode: str) -> None:
-    _hr("1/8 preflight")
+    _hr("1/10 preflight")
     if mode == "docker":
         if not shutil.which("docker"):
             _fail("docker not found on PATH.")
         r = _run(["docker", "info", "--format", "{{.ServerVersion}}"],
                  capture_output=True, text=True)
         if r.returncode != 0:
-            _fail("Docker daemon not reachable — start Docker Desktop and retry.")
+            _fail("Docker daemon not reachable, start Docker Desktop and retry.")
         print(f"Docker daemon OK (server {r.stdout.strip()})")
     else:
         import importlib.util
@@ -160,12 +173,12 @@ def stage_preflight(mode: str) -> None:
 
 
 def stage_build(runner: Runner, skip: bool) -> None:
-    _hr("2/8 build image")
+    _hr("2/10 build image")
     if runner.mode != "docker":
-        print("local mode — skipping image build")
+        print("local mode, skipping image build")
         return
     if skip:
-        print("--skip-build set — using existing image")
+        print("--skip-build set, using existing image")
         return
     r = _run(["docker", "build", "-t", runner.image, str(REPO_ROOT)])
     if r.returncode != 0:
@@ -173,7 +186,7 @@ def stage_build(runner: Runner, skip: bool) -> None:
 
 
 def stage_doctor(runner: Runner) -> None:
-    _hr("3/8 dependency & health check (doctor)")
+    _hr("3/10 dependency & health check (doctor)")
     if runner.vlm(["doctor"]).returncode != 0:
         _fail("doctor reported a critical dependency failure.")
 
@@ -186,17 +199,59 @@ def stage_ingest(runner: Runner, db: str, extra: list[str]) -> None:
 
 
 def stage_verify(runner: Runner, db: str) -> None:
-    _hr("7/8 verify correctness (verify-db)")
+    _hr("7/10 verify correctness (verify-db)")
     args = ["verify-db", "--db", db, "--dataroot", runner.data_path()]
     if runner.vlm(args, mount_data=True).returncode != 0:
-        _fail("acceptance checks failed — results are not sound.")
+        _fail("acceptance checks failed, results are not sound.")
 
 
 def stage_query(runner: Runner, db: str) -> None:
-    _hr("8/8 query smoke")
+    _hr("8/10 query smoke")
     # Query a term BLIP reliably emits on driving scenes.
     if runner.vlm(["query", "road", "--db", db]).returncode != 0:
         _fail("query failed.")
+
+
+def stage_accuracy(runner: Runner) -> None:
+    _hr("9/10 correctness, object-grounding vs nuScenes GT")
+    # single-frame DB: precision floor + regression vs the committed baseline.
+    single = ["verify-accuracy", "--db", runner.db_path(), "--dataroot", runner.data_path(),
+              "--out", runner.accuracy_path()]
+    if runner.vlm(single, mount_data=True).returncode != 0:
+        _fail("correctness gate failed (single), captions not grounded in nuScenes GT.")
+    # clusters DB: no committed baseline for this config, so gate on the precision
+    # floor only (a slightly lower floor gives the medoid captions margin).
+    clusters = [
+        "verify-accuracy", "--db", runner.db_path_clusters(), "--dataroot", runner.data_path(),
+        "--out", runner.accuracy_path_clusters(), "--no-baseline", "--min-precision", "0.8",
+    ]
+    if runner.vlm(clusters, mount_data=True).returncode != 0:
+        _fail("correctness gate failed (clusters), captions not grounded in nuScenes GT.")
+
+
+def stage_model_sanity(runner: Runner) -> None:
+    """Independent axis: has BLIP itself regressed on general-domain images?
+
+    Fetches a small COCO caption set from the official source (host-side, network
+    needed) and scores BLEU-4 against a floor. Offline, the fetch fails and the
+    stage is skipped with a warning, it never blocks acceptance for lack of net;
+    it only fails if the model is actually present but degraded.
+    """
+    _hr("10/10 model-sanity, BLIP BLEU-4 on COCO")
+    coco_dir = runner.out_dir / "coco_sanity"
+    fetch = _run([sys.executable, str(REPO_ROOT / "scripts" / "fetch_coco_sanity.py"),
+                  "--out", str(coco_dir)])
+    if fetch.returncode != 0:
+        print("[WARN] COCO fetch failed (offline?), skipping model-sanity.", flush=True)
+        return
+
+    if runner.mode == "docker":
+        args = ["bleu-sanity", "--data", "/coco"]
+        result = runner.vlm(args, mounts=[(str(coco_dir), "/coco")])
+    else:
+        result = runner.vlm(["bleu-sanity", "--data", str(coco_dir)])
+    if result.returncode != 0:
+        _fail("model-sanity BLEU below floor, BLIP may have regressed.")
 
 
 # --------------------------------------------------------------------------- #
@@ -225,20 +280,20 @@ def main(argv: list[str] | None = None) -> int:
     out_dir.mkdir(parents=True, exist_ok=True)
     runner = Runner(args.mode, args.image, dataroot, out_dir)
 
-    print(f"vlm-project production acceptance — mode={args.mode}, dataset={dataroot}")
+    print(f"vlm-project production acceptance, mode={args.mode}, dataset={dataroot}")
     t0 = time.time()
 
     stage_preflight(args.mode)
     stage_build(runner, args.skip_build)
     stage_doctor(runner)
 
-    _hr("4/8 ensure real nuScenes dataset")
+    _hr("4/10 ensure real nuScenes dataset")
     ensure_dataset(dataroot, args.version, args.url, allow_download=not args.no_download)
 
-    _hr("5/8 ingest real clips (single-frame)")
+    _hr("5/10 ingest real clips (single-frame)")
     stage_ingest(runner, runner.db_path(), extra=[])
 
-    _hr("6/8 ingest real clips (clustering, multi-scene)")
+    _hr("6/10 ingest real clips (clustering, multi-scene)")
     stage_ingest(runner, runner.db_path_clusters(), extra=["--selector", "clusters"])
 
     stage_verify(runner, runner.db_path())
@@ -246,8 +301,15 @@ def main(argv: list[str] | None = None) -> int:
 
     stage_query(runner, runner.db_path())
 
+    # Correctness (not just soundness): captions grounded in real GT boxes.
+    stage_accuracy(runner)
+
+    # Independent model-sanity axis: BLIP quality on general-domain COCO images.
+    stage_model_sanity(runner)
+
     _hr(f"RESULT: PRODUCTION ACCEPTANCE PASSED in {time.time() - t0:.0f}s")
     print(f"Databases in {out_dir}: scenes.db (single), clusters.db (segments)")
+    print(f"Accuracy report: {out_dir / 'accuracy.json'}")
     return 0
 
 

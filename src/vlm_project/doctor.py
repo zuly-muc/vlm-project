@@ -79,7 +79,7 @@ def render(checks: list[HealthCheck]) -> str:
             mark = "PASS"
         else:
             mark = "FAIL" if c.critical else "WARN"
-        lines.append(f"  [{mark}] {c.name}" + (f" — {c.detail}" if c.detail else ""))
+        lines.append(f"  [{mark}] {c.name}" + (f": {c.detail}" if c.detail else ""))
     return "\n".join(lines)
 
 

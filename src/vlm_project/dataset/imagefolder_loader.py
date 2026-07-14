@@ -1,6 +1,6 @@
 """Generic image-folder loader: every image is a one-frame clip.
 
-This is what makes the container dataset-agnostic -- point it at any directory of
+This is what makes the container dataset-agnostic: point it at any directory of
 images and each becomes a clip with a single frame, so ``single`` selection
 produces one description per image. (Clustering degenerates to one segment here,
 which is the correct behaviour for standalone images.)

@@ -3,7 +3,7 @@
 Pure standard library (sqlite3, json, os, string) so it runs on the host, in the
 container, or in CI without torch/transformers/nuscenes-devkit. Used by the
 ``vlm-project verify-db`` command and the production acceptance script to assert
-that an ingest over real data produced *sound* results — not just that it ran.
+that an ingest over real data produced *sound* results, not just that it ran.
 
 The checks are deliberately structural + heuristic (a generative caption has no
 single "right" answer): row coverage matches the dataset, every description is
@@ -56,7 +56,7 @@ class AcceptanceReport:
         lines = []
         for c in self.checks:
             mark = "PASS" if c.ok else "FAIL"
-            lines.append(f"  [{mark}] {c.name}" + (f" — {c.detail}" if c.detail else ""))
+            lines.append(f"  [{mark}] {c.name}" + (f": {c.detail}" if c.detail else ""))
         lines.append(f"  => {'ALL CHECKS PASSED' if self.ok else 'ACCEPTANCE FAILED'}")
         return "\n".join(lines)
 
@@ -64,7 +64,7 @@ class AcceptanceReport:
 def scene_names_from_dataset(dataroot: str, version: str = "v1.0-mini") -> list[str]:
     """Read the real scene names straight from ``<dataroot>/<version>/scene.json``.
 
-    No devkit needed — just the JSON table — so the host can cross-check coverage.
+    No devkit needed, just the JSON table, so the host can cross-check coverage.
     """
     path = os.path.join(dataroot, version, "scene.json")
     with open(path, encoding="utf-8") as fh:
@@ -135,7 +135,7 @@ def verify_db(
                        "all present" if not missing else f"missing: {missing[:5]}")
 
         # 6) FTS round-trip: a token of each caption retrieves its own row. Search
-        # with no truncation (limit = row count) — this verifies the index contains
+        # with no truncation (limit = row count), this verifies the index contains
         # the row, not that it ranks in some top-N against rows sharing the word.
         misses = []
         for r in rows:

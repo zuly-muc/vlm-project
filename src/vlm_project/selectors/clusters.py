@@ -2,13 +2,13 @@
 
 Pipeline within the selector:
 
-1. Embed every frame (cheap) using an injected ``Embedder`` -- in production this
+1. Embed every frame (cheap) using an injected ``Embedder``. In production this
    is BLIP's own vision encoder, so no extra model is loaded.
 2. Walk the frames in order and start a new segment whenever the cosine distance
    to the previous frame exceeds ``threshold``. This keeps segments *contiguous
    in time* (a video property), unlike generic k-means.
 3. Pick each segment's medoid (the frame closest to the others) as its
-   representative -- only these get captioned by the VLM.
+   representative; only these get captioned by the VLM.
 
 Embeddings are injected, so tests drive this with deterministic vectors and no
 model.
@@ -26,7 +26,7 @@ from vlm_project.vlm.base import Embedder
 class ClusterSegmentSelector:
     name = "clusters"
 
-    def __init__(self, embedder: Embedder, threshold: float = 0.25):
+    def __init__(self, embedder: Embedder, threshold: float = 0.05):
         self.embedder = embedder
         self.threshold = threshold
 

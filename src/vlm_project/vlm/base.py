@@ -2,8 +2,8 @@
 
 A backend turns an image into a short natural-language description. Optionally it
 can also embed images (the clustering selector reuses BLIP's vision encoder for
-this), so embedding is a separate, optional capability checked via
-``supports_embedding``.
+this), so embedding is a separate, optional capability: the factory checks it with
+``isinstance(backend, Embedder)`` before building the ``clusters`` selector.
 """
 
 from __future__ import annotations

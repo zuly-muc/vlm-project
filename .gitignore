@@ -1,6 +1,14 @@
-# Dataset (mounted at runtime, never committed)
-data/
+# Dataset (mounted at runtime, never committed). Anchored to the repo root so it
+# does NOT also ignore tests/data/ (which holds committed test fixtures).
+/data/
 *.tgz
+
+# Fetched COCO model-sanity micro-set (pulled from official source, not vendored)
+tests/data/coco_sanity/
+
+# Offline-only helper that generated the committed README hero image; not part
+# of the app, kept out of the repo (the produced docs/assets/hero.png stays).
+scripts/make_readme_assets.py
 
 # Outputs
 out/

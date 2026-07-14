@@ -1,9 +1,9 @@
-"""Shared fixtures. Everything here is tiny and synthetic — no dataset, no model.
+"""Shared fixtures. Everything here is tiny and synthetic, no dataset, no model.
 
 * ``make_image`` writes solid-colour JPEGs so loaders/selectors have real files.
 * ``fake_nusc`` is a stand-in for the devkit ``NuScenes`` object exposing only the
   three methods :class:`NuScenesLoader` uses, wired as a short ``next``-linked
-  keyframe chain — so the loader is exercised end-to-end on kilobytes.
+  keyframe chain, so the loader is exercised end-to-end on kilobytes.
 """
 
 from __future__ import annotations

@@ -1,12 +1,14 @@
-"""Selector logic with deterministic, injected embeddings — no BLIP needed."""
+"""Selector logic with deterministic, injected embeddings, no BLIP needed."""
 
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from vlm_project.models import ClipItem, Frame
 from vlm_project.selectors.clusters import ClusterSegmentSelector
 from vlm_project.selectors.single import SingleKeyframeSelector
+from vlm_project.selectors.uniform import UniformSampleSelector
 
 
 def _clip(make_image, n: int) -> ClipItem:
@@ -58,3 +60,37 @@ def test_clusters_single_segment_when_uniform(make_image):
     items = ClusterSegmentSelector(_ScriptedEmbedder(vectors), threshold=0.25).select(clip)
     assert len(items) == 1
     assert items[0].frame_range == (0, 2)
+
+
+def test_uniform_picks_evenly_spaced_endpoints(make_image):
+    clip = _clip(make_image, 10)
+    items = UniformSampleSelector(n=3).select(clip)
+    # 10 frames (indices 0-9), 3 samples: endpoints + evenly-spaced midpoint.
+    assert [it.frame_range[0] for it in items] == [0, 4, 9]
+    assert [it.scene_id for it in items] == ["clip-x#0", "clip-x#1", "clip-x#2"]
+    assert all(it.metadata["strategy"] == "uniform" for it in items)
+
+
+def test_uniform_n1_is_middle_with_no_suffix(make_image):
+    clip = _clip(make_image, 5)
+    items = UniformSampleSelector(n=1).select(clip)
+    assert len(items) == 1
+    assert items[0].scene_id == "clip-x"  # like ``single``: no #segment suffix
+    assert items[0].frame_range == (2, 2)
+
+
+def test_uniform_clamps_and_dedupes_on_short_clip(make_image):
+    # n larger than the clip: never emit duplicate frames.
+    clip = _clip(make_image, 2)
+    items = UniformSampleSelector(n=5).select(clip)
+    assert [it.frame_range[0] for it in items] == [0, 1]
+
+
+def test_uniform_empty_clip(make_image):
+    empty = ClipItem(clip_id="c", frames=[], loader="test")
+    assert UniformSampleSelector(n=3).select(empty) == []
+
+
+def test_uniform_rejects_zero(make_image):
+    with pytest.raises(ValueError):
+        UniformSampleSelector(n=0)

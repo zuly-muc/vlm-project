@@ -1,7 +1,9 @@
-"""Command-line entrypoint: ``vlm-project {ingest,query,export-json}``.
+"""Command-line entrypoint for ``vlm-project``.
 
-Config comes from environment variables (the container's contract) with CLI flags
-taking precedence, so the same image is driven either way.
+Subcommands: ``ingest``, ``query``, ``export-json``, ``doctor``, ``verify-db``,
+``verify-accuracy``, ``bleu-sanity``. Config comes from environment variables (the
+container's contract) with CLI flags taking precedence, so the same image is driven
+either way.
 """
 
 from __future__ import annotations
@@ -40,10 +42,16 @@ def build_parser() -> argparse.ArgumentParser:
     ing.add_argument("--loader", choices=["nuscenes", "imagefolder", "video"])
     ing.add_argument("--dataroot", help="dataset root / image dir / video path (env: DATAROOT)")
     ing.add_argument("--camera", help="nuScenes sensor channel (env: CAMERA)")
-    ing.add_argument("--selector", choices=["single", "clusters"])
+    ing.add_argument("--selector", choices=["single", "uniform", "clusters"])
     ing.add_argument("--single-strategy", choices=["middle", "sharpest"])
+    ing.add_argument("--uniform-samples", type=int,
+                     help="frames per clip for --selector uniform (env: UNIFORM_SAMPLES)")
     ing.add_argument("--cluster-threshold", type=float)
-    ing.add_argument("--backend", choices=["blip", "fake", "anthropic", "openai"])
+    ing.add_argument("--backend", choices=["blip", "moondream", "fake"])
+    ing.add_argument("--stage-dir",
+                     help="build the DB in this local scratch dir, then move it to "
+                          "--db on completion (env: STAGE_DIR); avoids per-row writes "
+                          "to a bind mount")
 
     q = sub.add_parser("query", help="full-text search the descriptions")
     _add_common(q)
@@ -66,25 +74,46 @@ def build_parser() -> argparse.ArgumentParser:
                      help="skip image-file existence (e.g. paths not mounted here)")
     ver.add_argument("--vocab-fraction", type=float, default=0.5)
 
+    bs = sub.add_parser("bleu-sanity",
+                        help="model-sanity: caption a COCO micro-set and score BLEU-4")
+    bs.add_argument("--data", required=True,
+                    help="dir with references.json + images/ (see fetch_coco_sanity.py)")
+    bs.add_argument("--backend", choices=["blip", "fake", "moondream"], default="blip")
+    bs.add_argument("--min-bleu", type=float, default=0.10, help="broken-model floor")
+
+    acc = sub.add_parser("verify-accuracy",
+                         help="object-grounding correctness vs nuScenes GT boxes")
+    _add_common(acc)
+    acc.add_argument("--dataroot", required=True, help="nuScenes dataset root (has GT boxes)")
+    acc.add_argument("--version", default="v1.0-mini")
+    acc.add_argument("--camera", default="CAM_FRONT")
+    acc.add_argument("--out", help="write metrics JSON here (e.g. out/accuracy.json)")
+    acc.add_argument("--baseline", help="baseline metrics JSON (default: package baseline)")
+    acc.add_argument("--no-baseline", action="store_true",
+                     help="skip the baseline-regression check; keep only the precision floor "
+                          "(for a config with no committed baseline, e.g. clusters)")
+    acc.add_argument("--min-precision", type=float, default=0.90,
+                     help="absolute precision floor the gate enforces (default 0.90)")
+    acc.add_argument("--write-baseline", metavar="PATH",
+                     help="write this run's metrics as a baseline file and exit 0")
+
     return parser
 
 
 def _config_from(args: argparse.Namespace) -> Config:
-    """Env defaults, overridden by any CLI flag that was actually provided."""
+    """Env defaults, overridden by any CLI flag that was actually provided.
+
+    Each ``Config`` field is overridden by the like-named CLI argument when the user
+    passed one; the only exception is ``db_path``, whose flag is ``--db``. Fields
+    with no matching flag keep their environment/default value. Adding a config
+    field plus a same-named flag is therefore all that is needed to wire it up.
+    """
     cfg = Config.from_env()
-    overrides = {
-        "loader": getattr(args, "loader", None),
-        "dataroot": getattr(args, "dataroot", None),
-        "camera": getattr(args, "camera", None),
-        "selector": getattr(args, "selector", None),
-        "single_strategy": getattr(args, "single_strategy", None),
-        "cluster_threshold": getattr(args, "cluster_threshold", None),
-        "backend": getattr(args, "backend", None),
-        "db_path": getattr(args, "db", None),
-    }
-    for key, value in overrides.items():
+    for field_name in cfg.__dataclass_fields__:
+        arg_name = "db" if field_name == "db_path" else field_name
+        value = getattr(args, arg_name, None)
         if value is not None:
-            setattr(cfg, key, value)
+            setattr(cfg, field_name, value)
     return cfg
 
 
@@ -92,7 +121,7 @@ def _cmd_ingest(cfg: Config) -> int:
     loader = factory.build_loader(cfg)
     backend = factory.build_backend(cfg)
     selector = factory.build_selector(cfg, backend)
-    with SceneStore(cfg.db_path) as store:
+    with SceneStore(cfg.db_path, stage_dir=cfg.stage_dir) as store:
         stats = run(loader, selector, backend, store)
         total = store.count()
     print(
@@ -145,6 +174,55 @@ def _cmd_verify_db(cfg: Config, args: argparse.Namespace) -> int:
     return 0 if report.ok else 1
 
 
+def _cmd_bleu_sanity(cfg: Config, args: argparse.Namespace) -> int:
+    from vlm_project import sanity
+
+    backend = factory.build_backend(cfg)
+    report = sanity.run_bleu_sanity(args.data, backend, min_bleu=args.min_bleu)
+    print(report.render())
+    return 0 if report.ok else 1
+
+
+def _cmd_verify_accuracy(cfg: Config, args: argparse.Namespace) -> int:
+    from nuscenes.nuscenes import NuScenes
+
+    from vlm_project import grounding
+
+    nusc = NuScenes(version=args.version, dataroot=args.dataroot, verbose=False)
+    provider = grounding.make_nuscenes_gt_provider(nusc, camera=args.camera)
+    with SceneStore(cfg.db_path) as store:
+        rows = store.all()
+    report = grounding.evaluate(rows, provider)
+    print(report.render())
+
+    metrics = report.metrics()
+    if args.out:
+        with open(args.out, "w", encoding="utf-8") as fh:
+            json.dump({"metrics": metrics,
+                       "scenes": [{"scene_id": s.scene_id, "said": sorted(s.said),
+                                   "present": sorted(s.present)} for s in report.scenes]},
+                      fh, indent=2)
+        print(f"  wrote metrics -> {args.out}")
+
+    if args.write_baseline:
+        with open(args.write_baseline, "w", encoding="utf-8") as fh:
+            json.dump({"metrics": metrics}, fh, indent=2)
+        print(f"  wrote baseline -> {args.write_baseline}")
+        return 0
+
+    if args.no_baseline:
+        baseline = None
+    elif args.baseline:
+        with open(args.baseline, encoding="utf-8") as fh:
+            baseline = json.load(fh)["metrics"]
+    else:
+        baseline = grounding.load_default_baseline()
+
+    gate = grounding.check_gate(report, baseline, min_precision=args.min_precision)
+    print(gate.render())
+    return 0 if gate.ok else 1
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     logging.basicConfig(
@@ -165,6 +243,10 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_export(cfg, args.out)
     if args.command == "verify-db":
         return _cmd_verify_db(cfg, args)
+    if args.command == "verify-accuracy":
+        return _cmd_verify_accuracy(cfg, args)
+    if args.command == "bleu-sanity":
+        return _cmd_bleu_sanity(cfg, args)
     return 1
 
 

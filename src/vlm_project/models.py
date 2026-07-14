@@ -1,13 +1,12 @@
 """Core data contracts passed between the loader, selector, VLM backend, and store.
 
-These dataclasses are the single serialization source: the pipeline builds
-``SceneDescription`` objects and the store/JSON export read from them, so JSON,
-the SQLite rows, and the tests all agree on one shape.
+``SceneDescription`` is the record the store persists and the JSON export returns,
+so the pipeline, the database, and the tests all agree on one shape.
 """
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from typing import Any
 
 
@@ -67,9 +66,3 @@ class SceneDescription:
     backend: str
     inference_seconds: float
     metadata: dict[str, Any] = field(default_factory=dict)
-
-    def to_dict(self) -> dict[str, Any]:
-        d = asdict(self)
-        # JSON has no tuple type; represent the inclusive range as a 2-list.
-        d["frame_range"] = list(self.frame_range)
-        return d

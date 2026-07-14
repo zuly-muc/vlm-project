@@ -1,6 +1,11 @@
 # Self-contained CPU image: app + CPU-only torch + baked BLIP weights.
-# The dataset and outputs are NEVER baked in — they are mounted at runtime.
-FROM python:3.11-slim
+# The dataset and outputs are NEVER baked in, they are mounted at runtime.
+#
+# Python 3.12 is the interpreter the whole pipeline is tested on. Combined with
+# the nuscenes-devkit 1.2.0 pin in requirements.lock, every dependency installs
+# from a prebuilt wheel, the old 1.1.x line pulled Shapely<2.0 / matplotlib<3.6,
+# which have no modern wheels and fail to compile in this toolchain-free image.
+FROM python:3.12-slim
 
 # HF cache location baked into the image; weights land here at build time.
 ENV HF_HOME=/opt/hf_cache \
@@ -26,9 +31,13 @@ COPY scripts ./scripts
 RUN python scripts/bake_weights.py
 
 # Default dataset/output contract (override with -e / -v at run time).
+# STAGE_DIR keeps ingest's many small SQLite commits on the container's local
+# filesystem; the finished DB is moved to the mounted /out in one step. This
+# avoids per-row writes to a bind mount (notably slow/locking on Windows hosts).
 ENV LOADER=nuscenes \
     DATAROOT=/data \
-    DB=/out/scenes.db
+    DB=/out/scenes.db \
+    STAGE_DIR=/tmp/vlm-stage
 
 ENTRYPOINT ["vlm-project"]
 CMD ["--help"]

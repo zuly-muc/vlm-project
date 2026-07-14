@@ -2,7 +2,7 @@
 
 A nuScenes "scene" is a ~20 s clip whose keyframes form a ``next``-linked list of
 samples. We walk that list, collecting one camera image per keyframe, and hand
-the whole frame list to the selector -- which then decides whether to describe a
+the whole frame list to the selector, which then decides whether to describe a
 single representative frame or several segments.
 
 The devkit ``NuScenes`` object is injected (see :meth:`from_dataroot`) so tests

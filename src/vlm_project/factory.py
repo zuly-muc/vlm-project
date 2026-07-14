@@ -22,14 +22,10 @@ def build_backend(cfg: Config) -> VLMBackend:
         from vlm_project.vlm.fake import FakeBackend
 
         return FakeBackend()
-    if cfg.backend == "anthropic":
-        from vlm_project.vlm.api import AnthropicBackend
+    if cfg.backend == "moondream":
+        from vlm_project.vlm.moondream import MoondreamBackend
 
-        return AnthropicBackend()
-    if cfg.backend == "openai":
-        from vlm_project.vlm.api import OpenAIBackend
-
-        return OpenAIBackend()
+        return MoondreamBackend(model_name=cfg.moondream_model)
     raise ValueError(f"unknown backend: {cfg.backend!r}")
 
 
@@ -38,6 +34,10 @@ def build_selector(cfg: Config, backend: VLMBackend) -> FrameSelector:
         from vlm_project.selectors.single import SingleKeyframeSelector
 
         return SingleKeyframeSelector(strategy=cfg.single_strategy)
+    if cfg.selector == "uniform":
+        from vlm_project.selectors.uniform import UniformSampleSelector
+
+        return UniformSampleSelector(n=cfg.uniform_samples)
     if cfg.selector == "clusters":
         from vlm_project.selectors.clusters import ClusterSegmentSelector
 

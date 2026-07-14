@@ -2,8 +2,8 @@
 
 One weight load serves both jobs:
 
-* ``describe`` -- conditional/unconditional caption generation.
-* ``embed``    -- pooled features from ``model.vision_model``, reused by the
+* ``describe``: conditional/unconditional caption generation.
+* ``embed``:    pooled features from ``model.vision_model``, reused by the
   clustering selector so no second model is needed.
 
 Weights are loaded lazily on first use, so importing this module (e.g. in the
@@ -52,7 +52,7 @@ class BlipBackend:
 
     @torch.no_grad()
     def embed(self, images: list[Image.Image]) -> np.ndarray:
-        """Pooled vision-encoder features, ``(n, d)`` — used for clustering."""
+        """Pooled vision-encoder features, ``(n, d)``: used for clustering."""
         self._ensure_loaded()
         rgb = [img.convert("RGB") for img in images]
         inputs = self._processor(images=rgb, return_tensors="pt")
