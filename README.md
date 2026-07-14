@@ -82,18 +82,10 @@ pytest                      # fast unit suite: no dataset, model, or network
 vlm-project ingest --dataroot ./data --db out/scenes.db -v
 ```
 
-**Configuration** is set by an environment variable, or the matching CLI flag which wins:
-
-| Concern | Env var | CLI flag | Default | Values |
-|---|---|---|---|---|
-| Dataset loader | `LOADER` | `--loader` | `nuscenes` | `nuscenes`, `imagefolder`, `video` |
-| Dataset path | `DATAROOT` | `--dataroot` | `./data` | any path |
-| nuScenes camera | `CAMERA` | `--camera` | `CAM_FRONT` | any channel |
-| Keyframe selection | `SELECTOR` | `--selector` | `single` | `single`, `uniform`, `clusters` |
-| Uniform samples | `UNIFORM_SAMPLES` | `--uniform-samples` | `3` | frames/clip for `uniform` |
-| Cluster cut point | `CLUSTER_THRESHOLD` | `--cluster-threshold` | `0.05` | cosine distance |
-| VLM backend | `VLM_BACKEND` | `--backend` | `blip` | `blip`, `moondream`, `fake` |
-| Database path | `DB` | `--db` | `./out/scenes.db` | any path |
+**Configuration** is set by environment variables, or the matching CLI flag which wins. The common ones
+are `LOADER`, `DATAROOT`, `SELECTOR`, `VLM_BACKEND`, and `DB` (all shown in the examples above). The full
+reference, with every variable, flag, default, and its accepted values, is in
+**[`docs/CONFIGURATION.md`](docs/CONFIGURATION.md)**.
 
 ## Deploy
 
