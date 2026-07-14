@@ -15,6 +15,7 @@ from PIL import Image
 
 class FakeBackend:
     name = "fake"
+    provenance = {"model_name": "fake", "revision": "n/a"}
 
     def describe(self, image: Image.Image) -> str:
         w, h = image.size

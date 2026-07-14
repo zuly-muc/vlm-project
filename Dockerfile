@@ -30,14 +30,25 @@ RUN pip install --no-deps .
 COPY scripts ./scripts
 RUN python scripts/bake_weights.py
 
+# Runtime is fully offline: the weights are baked, so forbid any hub network
+# fetch at run time (this enforces the offline claim). Set AFTER baking, which
+# is the one step that legitimately needs the network.
+ENV HF_HUB_OFFLINE=1 \
+    TRANSFORMERS_OFFLINE=1
+
 # Default dataset/output contract (override with -e / -v at run time).
-# STAGE_DIR keeps ingest's many small SQLite commits on the container's local
-# filesystem; the finished DB is moved to the mounted /out in one step. This
-# avoids per-row writes to a bind mount (notably slow/locking on Windows hosts).
 ENV LOADER=nuscenes \
     DATAROOT=/data \
-    DB=/out/scenes.db \
-    STAGE_DIR=/tmp/vlm-stage
+    DB=/out/scenes.db
+
+# Run as a non-root user (uid 10001). The baked HF cache is made world-readable
+# so the container works whether it runs as this user or is overridden with
+# `--user` to match a host. A host-mounted /out must be writable by the running
+# uid; pass `--user "$(id -u):$(id -g)"` when writing to a host-owned directory.
+RUN useradd --create-home --uid 10001 appuser \
+    && chmod -R a+rwX /opt/hf_cache \
+    && chown -R appuser:appuser /app
+USER appuser
 
 ENTRYPOINT ["vlm-project"]
 CMD ["--help"]

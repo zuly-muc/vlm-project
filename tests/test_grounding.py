@@ -81,6 +81,16 @@ def test_gate_fails_on_dominant_recall_regression():
     assert any("dominant-recall" in r for r in result.reasons)
 
 
+def test_gate_fails_on_zero_captions():
+    # An empty report has a vacuous precision of 1.0; the gate must fail closed
+    # rather than "pass" without evaluating a single caption.
+    from vlm_project.grounding import GroundingReport, check_gate
+
+    gate = check_gate(GroundingReport(), baseline=None)
+    assert not gate.ok
+    assert any("no captions" in r for r in gate.reasons)
+
+
 def test_default_baseline_is_shipped_and_wellformed():
     baseline = load_default_baseline()
     assert baseline is not None

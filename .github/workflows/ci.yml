@@ -41,33 +41,37 @@ jobs:
       - uses: actions/checkout@v4
       - name: Build image
         run: docker build -t vlm-project .
-      - name: doctor (dependency health inside the image)
+      - name: doctor (dependency health inside the image, default non-root user)
         run: docker run --rm vlm-project doctor
       - name: Fake-backend ingest + query (no dataset needed)
         run: |
           mkdir -p out imgs
+          # The image runs as a non-root user; pass --user so it can write to
+          # these runner-owned bind mounts (matches the documented host pattern).
+          U="$(id -u):$(id -g)"
           # Generate the test images with the image's OWN Pillow (the runner may
           # not have Pillow installed); --entrypoint python overrides vlm-project.
-          docker run --rm -v "$PWD/imgs:/imgs" --entrypoint python vlm-project -c \
+          docker run --rm --user "$U" -v "$PWD/imgs:/imgs" --entrypoint python vlm-project -c \
             "from PIL import Image; [Image.new('RGB',(48,36),(i*60,40,90)).save(f'/imgs/img{i}.jpg') for i in range(3)]"
-          docker run --rm -v "$PWD/imgs:/imgs:ro" -v "$PWD/out:/out" \
+          docker run --rm --user "$U" -v "$PWD/imgs:/imgs:ro" -v "$PWD/out:/out" \
             -e LOADER=imagefolder -e DATAROOT=/imgs -e DB=/out/s.db -e VLM_BACKEND=fake \
             vlm-project ingest -v
-          docker run --rm -v "$PWD/out:/out" -e DB=/out/s.db vlm-project query image
+          docker run --rm --user "$U" -v "$PWD/out:/out" -e DB=/out/s.db vlm-project query image
       - name: Video decode + all keyframe selectors on the committed clip
         run: |
           mkdir -p out
+          U="$(id -u):$(id -g)"
           # tests/data/video/highway.mp4 is a real motorway clip committed to the
           # repo (OpenCV, baked into the image, decodes it). Its ~90 frames make a
           # multi-frame clip, so this exercises every selector: single, uniform
           # (evenly-spaced frames), and clusters (segmented sub-scenes).
           for sel in single uniform clusters; do
-            docker run --rm -v "$PWD/tests/data/video:/vid:ro" -v "$PWD/out:/out" \
+            docker run --rm --user "$U" -v "$PWD/tests/data/video:/vid:ro" -v "$PWD/out:/out" \
               -e LOADER=video -e DATAROOT=/vid -e DB="/out/v_${sel}.db" \
               -e VLM_BACKEND=fake -e SELECTOR="$sel" \
               vlm-project ingest -v
           done
-          docker run --rm -v "$PWD/out:/out" -e DB=/out/v_uniform.db vlm-project query image
+          docker run --rm --user "$U" -v "$PWD/out:/out" -e DB=/out/v_uniform.db vlm-project query image
 
   # ---------------------------------------------------------------------------
   # Full production acceptance on the REAL nuScenes v1.0-mini dataset.

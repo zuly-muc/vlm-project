@@ -43,12 +43,6 @@ class Config:
 
     # Where results land.
     db_path: str = "./out/scenes.db"
-    # Optional container-local scratch dir for staged ingest writes. When set,
-    # ingest builds the DB here and moves the finished file to ``db_path`` once,
-    # keeping per-row commits off slow/locking bind mounts. Unset = write
-    # directly to ``db_path`` (the plain default for local dev). The container
-    # sets STAGE_DIR so Dockerized runs stage by default.
-    stage_dir: str | None = None
 
     @classmethod
     def from_env(cls) -> Config:
@@ -66,5 +60,4 @@ class Config:
             blip_model=_env("BLIP_MODEL", cls.blip_model),
             moondream_model=_env("MOONDREAM_MODEL", cls.moondream_model),
             db_path=_env("DB", cls.db_path),
-            stage_dir=os.environ.get("STAGE_DIR"),  # None when unset
         )

@@ -41,6 +41,8 @@ def build_parser() -> argparse.ArgumentParser:
     _add_common(ing)
     ing.add_argument("--loader", choices=["nuscenes", "imagefolder", "video"])
     ing.add_argument("--dataroot", help="dataset root / image dir / video path (env: DATAROOT)")
+    ing.add_argument("--nuscenes-version",
+                     help="nuScenes split for --loader nuscenes (env: NUSCENES_VERSION)")
     ing.add_argument("--camera", help="nuScenes sensor channel (env: CAMERA)")
     ing.add_argument("--selector", choices=["single", "uniform", "clusters"])
     ing.add_argument("--single-strategy", choices=["middle", "sharpest"])
@@ -48,10 +50,6 @@ def build_parser() -> argparse.ArgumentParser:
                      help="frames per clip for --selector uniform (env: UNIFORM_SAMPLES)")
     ing.add_argument("--cluster-threshold", type=float)
     ing.add_argument("--backend", choices=["blip", "moondream", "fake"])
-    ing.add_argument("--stage-dir",
-                     help="build the DB in this local scratch dir, then move it to "
-                          "--db on completion (env: STAGE_DIR); avoids per-row writes "
-                          "to a bind mount")
 
     q = sub.add_parser("query", help="full-text search the descriptions")
     _add_common(q)
@@ -121,7 +119,7 @@ def _cmd_ingest(cfg: Config) -> int:
     loader = factory.build_loader(cfg)
     backend = factory.build_backend(cfg)
     selector = factory.build_selector(cfg, backend)
-    with SceneStore(cfg.db_path, stage_dir=cfg.stage_dir) as store:
+    with SceneStore(cfg.db_path) as store:
         stats = run(loader, selector, backend, store)
         total = store.count()
     print(

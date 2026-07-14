@@ -42,6 +42,13 @@ def run(
     stats = RunStats()
     for clip in loader.iter_clips():
         stats.clips += 1
+        if not clip.frames:
+            # An empty clip (e.g. a nuScenes scene whose camera channel was
+            # missing on every keyframe) produces no description. Count it as a
+            # failure in the run stats rather than dropping it silently.
+            logger.warning("clip %s has no usable frames; counting as failure", clip.clip_id)
+            stats.failures += 1
+            continue
         try:
             scene_items = selector.select(clip)
         except Exception:  # noqa: BLE001 - one clip must not kill the run
@@ -68,6 +75,12 @@ def _describe_item(clip, item, backend: VLMBackend) -> SceneDescription:
     started = time.perf_counter()
     description = backend.describe(image)
     elapsed = time.perf_counter() - started
+    metadata = {**clip.metadata, **item.metadata}
+    # Record model provenance (repo, revision, generation params) alongside the
+    # row so a stored caption can be traced to the exact model that produced it.
+    provenance = getattr(backend, "provenance", None)
+    if provenance:
+        metadata["model"] = provenance
     return SceneDescription(
         scene_id=item.scene_id,
         clip_id=item.clip_id,
@@ -79,5 +92,5 @@ def _describe_item(clip, item, backend: VLMBackend) -> SceneDescription:
         description=description,
         backend=backend.name,
         inference_seconds=round(elapsed, 4),
-        metadata={**clip.metadata, **item.metadata},
+        metadata=metadata,
     )

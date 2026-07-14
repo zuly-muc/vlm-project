@@ -7,6 +7,8 @@ backends/loaders is deferred to the branch that needs them.
 
 from __future__ import annotations
 
+import os
+
 from vlm_project.config import Config
 from vlm_project.dataset.base import DatasetLoader
 from vlm_project.selectors.base import FrameSelector
@@ -64,5 +66,9 @@ def build_loader(cfg: Config) -> DatasetLoader:
     if cfg.loader == "video":
         from vlm_project.dataset.video_loader import VideoLoader
 
-        return VideoLoader(path=cfg.dataroot, frame_dir="./out/_video_frames")
+        # Extract frames next to the output database (a writable, mounted volume),
+        # not under the container's WORKDIR, which a non-root/overridden user may
+        # not own.
+        frame_dir = os.path.join(os.path.dirname(cfg.db_path) or ".", "_video_frames")
+        return VideoLoader(path=cfg.dataroot, frame_dir=frame_dir)
     raise ValueError(f"unknown loader: {cfg.loader!r}")

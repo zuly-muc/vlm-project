@@ -201,6 +201,14 @@ def check_gate(
     m = report.metrics()
     reasons: list[str] = []
 
+    # An empty report scores a vacuous precision of 1.0 (no predictions, no false
+    # positives), so it would otherwise pass the floor without evaluating a single
+    # caption. Fail closed: a gate over zero captions proves nothing.
+    if m["n_captions"] == 0:
+        return GateResult(ok=False, reasons=[
+            "no captions were evaluated (empty DB, or no nuScenes rows with a sample_token)"
+        ])
+
     if m["precision"] < min_precision:
         reasons.append(f"precision {m['precision']:.2f} < floor {min_precision:.2f} "
                        "(captions naming absent objects)")
