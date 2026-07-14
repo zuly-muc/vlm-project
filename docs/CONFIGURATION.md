@@ -1,9 +1,9 @@
 # Configuration
 
-`vlm-project` is configured entirely through **environment variables**, with a matching **CLI flag**
-for each that takes precedence when both are set. Precedence is: **CLI flag > environment variable >
-built-in default**. The container's contract is the environment variables; the flags are for local runs
-and overrides.
+`vlm-project` is configured entirely through **environment variables**. Most have a matching **CLI flag**
+that takes precedence when both are set; a few (the model checkpoints, noted below) are environment-only.
+Precedence is: **CLI flag > environment variable > built-in default**. The container's contract is the
+environment variables; the flags are for local runs and overrides.
 
 ## Reference
 
@@ -13,7 +13,7 @@ and overrides.
 |---|---|---|---|
 | `LOADER` | `--loader` | `nuscenes` | Chooses how the input is read: `nuscenes` (a driving dataset), `imagefolder` (a directory of images), or `video` (a video file, sampled into frames). |
 | `DATAROOT` | `--dataroot` | `./data` | Where the input lives: the dataset root, the image directory, or the video file path, depending on `LOADER`. |
-| `NUSCENES_VERSION` | `--version` | `v1.0-mini` | Which nuScenes split to read (for example `v1.0-mini` for the small sample, `v1.0-trainval` for the full set). Ignored by the other loaders. |
+| `NUSCENES_VERSION` | `--nuscenes-version` | `v1.0-mini` | Which nuScenes split to read (for example `v1.0-mini` for the small sample, `v1.0-trainval` for the full set). Ignored by the other loaders. (The `verify-db` / `verify-accuracy` commands take the same value as `--version`.) |
 | `CAMERA` | `--camera` | `CAM_FRONT` | Which nuScenes camera to caption (the front camera by default). Ignored by the other loaders. |
 
 ### Selection: which frame(s) to describe
@@ -38,7 +38,6 @@ and overrides.
 | Env var | CLI flag | Default | What it does |
 |---|---|---|---|
 | `DB` | `--db` | `./out/scenes.db` | Path of the SQLite database to write (on `ingest`) or read (on `query` / `export-json`). |
-| `STAGE_DIR` | `--stage-dir` | unset | A container-local scratch directory. When set, `ingest` builds the database here and moves the finished file to `DB` in one step, keeping many small writes off slow or locking mounted volumes. |
 
 ## Notes
 
@@ -47,8 +46,8 @@ and overrides.
   `uniform`.
 - **`CLUSTER_THRESHOLD` is small on purpose** because BLIP's pooled vision embeddings are highly
   concentrated (within-scene frames measure ~0.00, a hard scene cut ~0.08). Tune it per dataset.
-- **`STAGE_DIR` is set by the container by default**, so Dockerized runs stage automatically. Leave it
-  unset for local development to write straight to `DB`.
+- **The image runs as a non-root user** (uid 10001). When writing to a host-owned output directory, pass
+  `--user "$(id -u):$(id -g)"` so the container can write to it.
 
 ## Examples
 

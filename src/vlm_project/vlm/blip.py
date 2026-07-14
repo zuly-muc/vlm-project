@@ -27,10 +27,27 @@ class BlipBackend:
         self.num_beams = num_beams
         self._processor = None
         self._model = None
+        self._revision: str | None = None  # resolved commit, captured on load
 
     @property
     def name(self) -> str:
         return "blip-base"
+
+    @property
+    def provenance(self) -> dict:
+        """Traceability recorded on every row: model, resolved commit, gen params.
+
+        ``revision`` is the exact Hugging Face commit the weights were loaded
+        from (captured at load, ``None`` if not yet loaded or unavailable). The
+        built image, with its weights baked in, is the reproducible unit; this
+        just records which commit those weights came from.
+        """
+        return {
+            "model_name": self.model_name,
+            "revision": self._revision,
+            "max_new_tokens": self.max_new_tokens,
+            "num_beams": self.num_beams,
+        }
 
     def _ensure_loaded(self) -> None:
         if self._model is not None:
@@ -40,6 +57,8 @@ class BlipBackend:
         self._processor = BlipProcessor.from_pretrained(self.model_name)
         self._model = BlipForConditionalGeneration.from_pretrained(self.model_name)
         self._model.eval()  # CPU by default; no .to("cuda")
+        # Record the exact commit the weights resolved to, for provenance.
+        self._revision = getattr(self._model.config, "_commit_hash", None)
 
     @torch.no_grad()
     def describe(self, image: Image.Image) -> str:

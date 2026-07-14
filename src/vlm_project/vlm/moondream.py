@@ -42,6 +42,11 @@ class MoondreamBackend:
     def name(self) -> str:
         return "moondream2"
 
+    @property
+    def provenance(self) -> dict:
+        """Traceability recorded on every row: exact model, revision, prompt."""
+        return {"model_name": self.model_name, "revision": self.revision, "prompt": self.prompt}
+
     def _ensure_loaded(self) -> None:
         if self._model is not None:
             return

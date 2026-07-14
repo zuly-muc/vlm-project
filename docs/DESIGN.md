@@ -69,17 +69,16 @@ portable (copy it, ship it, open it in any SQLite tool) and needs no server to r
 server or a vector database would add moving parts we do not need for keyword search over short
 captions; the door is left open to add semantic search later.
 
-Writes are made safe on the container: `ingest` builds the database on the container's own disk and then
-moves the finished file onto the mounted output volume in one step. So a slow or crashed run never
-leaves a half-written file where someone might read it, and it sidesteps a real problem with writing
-many small updates directly onto a mounted Windows folder.
+`ingest` writes rows straight to the database file as it goes; re-ingesting the same scene replaces its
+row rather than duplicating it. Each row also records its model provenance (repo, revision, generation
+parameters) so a caption can be traced to the exact model that produced it.
 
 ## Packaging
 
-The image bundles the app, a CPU-only build of PyTorch, and the model weights, so it runs offline with
-no GPU and no first-run download. The dataset and the outputs are never baked in; they are mounted at
-run time, which keeps the image small and immutable. Dependency versions are pinned so a rebuild
-produces the same image.
+The image bundles the app, CPU-only PyTorch, and the model weights, so it runs offline with no GPU and no
+first-run download. The dataset and outputs are mounted at run time, never baked in, which keeps the
+image small. Because the weights are frozen inside the image, the image itself is the reproducible unit;
+each row also records the exact model commit its weights came from.
 
 ## Are the captions any good?
 
@@ -95,8 +94,9 @@ data:
   reference captions. This is a tripwire that catches the model quietly getting worse after a library or
   weights change, which the driving-only grounding check would miss.
 
-Both are trustworthy because the model is deterministic: with versions pinned, it produces byte-for-byte
-identical captions run to run, so a change in the numbers means a real regression, not noise.
+Both are trustworthy because the model is deterministic: for a fixed model revision on the same CPU
+stack, BLIP's beam search produces the same captions run to run, so a change in the numbers means a real
+regression, not noise.
 
 ## Testing, briefly
 
@@ -112,5 +112,17 @@ real dataset are opt-in and manual. The full strategy and coverage are in
   actually says so.
 - Running at full-dataset scale means sharding across many jobs. The pieces allow it, but the
   orchestration is described, not built.
-- A crash mid-`ingest` keeps the previous good database and discards the partial one. Safe, but not
-  resumable.
+
+## Out of scope (possible future work)
+
+These can be interesting additions relating to hardening production and scale readiness. Kept out on purpose to stay focused on the core task; each is a clean addition later, not a redesign:
+
+- **Staged, atomic writes.** `ingest` writes rows directly to the output database. Building it on local
+  scratch and moving the finished file over in one step would make writes safer on slow or locking bind
+  mounts and mean a crash never leaves a partial file. Not implemented.
+- **A failure-coverage gate.** Per-scene failures are logged, counted, and skipped, and the run still
+  exits 0 with whatever it produced. Rejecting a run (nonzero exit, output withheld) when too large a
+  fraction of scenes fail would make partial results impossible to mistake for complete ones. Not
+  implemented.
+- **Sharding and merge.** As above: deterministic shard flags plus a `merge` command would make the
+  scale-out path a single supported workflow.

@@ -49,6 +49,39 @@ def test_missing_image_is_skipped_not_fatal(tmp_path: Path, fake_backend):
         assert [r["scene_id"] for r in store.all()] == ["good"]
 
 
+def test_empty_clip_is_counted_as_failure(tmp_path: Path, fake_backend):
+    # A frameless clip (e.g. a nuScenes scene whose camera was missing on every
+    # keyframe) must be recorded as a failure, not silently dropped.
+    class _EmptyThenGoodLoader:
+        name = "test"
+
+        def iter_clips(self):
+            yield ClipItem(clip_id="empty", frames=[], loader="test")
+            yield ClipItem(
+                clip_id="ok",
+                frames=[Frame(image_path=_valid_image(tmp_path), index=0)],
+                loader="test",
+            )
+
+    with SceneStore(tmp_path / "s.db") as store:
+        stats = run(_EmptyThenGoodLoader(), SingleKeyframeSelector(), fake_backend, store)
+
+        assert stats.clips == 2
+        assert stats.scenes == 1
+        assert stats.failures == 1
+        assert [r["scene_id"] for r in store.all()] == ["ok"]
+
+
+def test_row_records_model_provenance(tmp_path: Path, fake_nusc, fake_backend):
+    loader = NuScenesLoader(nusc=fake_nusc)
+    with SceneStore(tmp_path / "s.db") as store:
+        run(loader, SingleKeyframeSelector("middle"), fake_backend, store)
+        row = store.all()[0]
+
+    assert row["metadata"]["model"]["model_name"] == "fake"
+    assert row["metadata"]["nuscenes_version"] == "v1.0-mini"
+
+
 def _valid_image(tmp_path: Path) -> str:
     from PIL import Image
 

@@ -4,7 +4,7 @@
 
 ## Abstract
 
-`vlm-project` is an app that turns footage into a **searchable database of scene descriptions**. Simply Point it at a source (the nuScenes driving dataset, a folder of images, or video files) and it captions a representative frame of each clip with a vision-language model, storing every description in a local
+`vlm-project` is an app that turns driving footage into a **searchable database of scene descriptions**. Simply point it at a source (the nuScenes driving dataset, a folder of images, or video files) and it captions a representative frame of each clip with a vision-language model, storing every description in a local
 SQLite database with full-text search. One command ingests, another searches. It runs **fully offline on CPU** inside a container, and the database is a single portable file you can query, copy, or archive.
 
 
@@ -36,6 +36,34 @@ SQLite database with full-text search. One command ingests, another searches. It
                              matching scenes            keep for later
 ```
 
+## Deploy
+
+vlm-project deploys as a **stateless batch container**: push the image to a registry, then run it on
+anything that runs containers, with the dataset mounted in and an output volume mounted out, passing
+config as env vars. The container itself never changes; only the platform's wrapper around it does.
+
+See **[`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md)** for the run contract, a worked cloud example, and notes
+on scaling.
+
+## Design
+
+The pipeline is four swappable stages (`loader → selector → backend → store`) wired by `pipeline.run()`
+and assembled from config in one place (`factory.py`), so the dataset, keyframe strategy, and model are
+configuration choices rather than code changes. The store is a single SQLite file with an FTS5 index
+(`ingest` writes, `query` reads). Caption quality is checked two ways on real data: object-grounding
+against nuScenes ground-truth boxes (`verify-accuracy`), and a COCO BLEU-4 model-sanity tripwire
+(`bleu-sanity`).
+
+The design decisions and trade-offs are in **[`docs/DESIGN.md`](docs/DESIGN.md)**; the test strategy and
+coverage matrix are in **[`docs/TEST_PLAN.md`](docs/TEST_PLAN.md)**.
+
+## Configuration
+
+**Configuration** is set by environment variables, or the matching CLI flag which wins. The common ones
+are `LOADER`, `DATAROOT`, `SELECTOR`, `VLM_BACKEND`, and `DB` (all shown in the examples above). The full
+reference, with every variable, flag, default, and its accepted values, is in
+**[`docs/CONFIGURATION.md`](docs/CONFIGURATION.md)**.
+
 ## Install and use
 
 **Prerequisites:** Docker. The image is **~4 GB** (it bundles CPU PyTorch and the baked BLIP weights so
@@ -60,6 +88,8 @@ docker run --rm -v "$PWD/out:/out" -e DB=/out/demo.db vlm-project query car
 Results land in `./out/demo.db` on your machine, an ordinary SQLite file.
 
 > Note: **Windows (PowerShell):** use `${PWD}` and Windows source paths (for example `-v ${PWD}\pics:/data:ro`), or run inside WSL.
+>
+> Note: The image runs as a **non-root user**. If a run cannot write to the host-owned `./out` directory (a permission error on Linux), add `--user "$(id -u):$(id -g)"` to the `docker run` so it writes as you. See [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md).
 
 **Full run on nuScenes:** download **nuScenes v1.0-mini** (~4 GB, free account/EULA) and extract it so
 the root holds `samples/ sweeps/ maps/ v1.0-mini/`, then:
@@ -77,33 +107,3 @@ pip install -e ".[dev]"     # add ".[video]" for local video decoding
 pytest                      # fast unit suite: no dataset, model, or network
 vlm-project ingest --dataroot ./data --db out/scenes.db -v
 ```
-
-## Deploy
-
-vlm-project deploys as a **stateless batch container**: push the image to a registry, then run it on
-anything that runs containers (a VM, a CI runner, Kubernetes, AWS Batch, Google Cloud Run, ECS, and so
-on) with the dataset mounted in and an output volume mounted out, passing config as env vars. The
-container itself never changes; only the platform's wrapper around it does.
-
-See **[`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md)** for the full walkthrough: pushing the image, a
-portable Kubernetes `Job`, a managed Google Cloud Run Jobs example, and sharding for scale.
-
-## Design
-
-The pipeline is four swappable stages (`loader → selector → backend → store`) wired by `pipeline.run()`
-and assembled from config in one place (`factory.py`), so the dataset, keyframe strategy, and model are
-configuration choices rather than code changes. The store is a single SQLite file with an FTS5 index
-(`ingest` writes, `query` reads). Caption quality is checked two ways on real data: object-grounding
-against nuScenes ground-truth boxes (`verify-accuracy`), and a COCO BLEU-4 model-sanity tripwire
-(`bleu-sanity`).
-
-The design decisions and trade-offs are in **[`docs/DESIGN.md`](docs/DESIGN.md)**; the test strategy and
-coverage matrix are in **[`docs/TEST_PLAN.md`](docs/TEST_PLAN.md)**.
-
-## Configuration
-
-**Configuration** is set by environment variables, or the matching CLI flag which wins. The common ones
-are `LOADER`, `DATAROOT`, `SELECTOR`, `VLM_BACKEND`, and `DB` (all shown in the examples above). The full
-reference, with every variable, flag, default, and its accepted values, is in
-**[`docs/CONFIGURATION.md`](docs/CONFIGURATION.md)**.
-

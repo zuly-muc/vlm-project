@@ -74,23 +74,15 @@ def test_ingest_uniform_selector_flags(tmp_path: Path, capsys):
     assert "Ingested 2 scene(s)" in capsys.readouterr().out
 
 
-def test_ingest_with_stage_dir_publishes_db(tmp_path: Path, capsys):
-    images = tmp_path / "imgs"
-    images.mkdir()
-    _seed_images(images, n=2)
-    db = tmp_path / "out" / "scenes.db"
-    stage = tmp_path / "stage"
+def test_nuscenes_version_flag_threads_into_config():
+    # Regression: --nuscenes-version must be a real ingest flag and override env.
+    from vlm_project.cli import _config_from, build_parser
 
-    rc = main(["ingest", "--loader", "imagefolder", "--backend", "fake",
-               "--dataroot", str(images), "--db", str(db), "--stage-dir", str(stage)])
-    assert rc == 0
-    # Final DB exists at the requested path; scratch is cleaned up.
-    assert db.exists()
-    assert not (stage / "scenes.db").exists()
-
-    rc = main(["query", "image", "--db", str(db)])
-    assert rc == 0
-    assert "img0" in capsys.readouterr().out
+    args = build_parser().parse_args(
+        ["ingest", "--loader", "nuscenes", "--nuscenes-version", "v1.0-trainval"]
+    )
+    cfg = _config_from(args)
+    assert cfg.nuscenes_version == "v1.0-trainval"
 
 
 def test_export_json(tmp_path: Path, capsys):

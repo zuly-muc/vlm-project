@@ -40,7 +40,7 @@ captions) is caught by something that runs automatically.
 | **Backend: blip** | integration test | no (fake used for speed) | yes (the real captions) |
 | **Backend: fake** | yes | yes | no |
 | **Backend: moondream** | yes (wiring, mocked) | no | no |
-| **Store (SQLite + FTS5)** | yes (round-trip, idempotent, staged writes) | yes (writes + query) | yes |
+| **Store (SQLite + FTS5)** | yes (round-trip, idempotent) | yes (writes + query) | yes |
 | **Grounding (`verify-accuracy`)** | yes (scorer + gate, fake provider) | no | yes (single + clusters) |
 | **Model sanity (`bleu-sanity`)** | yes (scorer, fake backend) | no | yes (real COCO BLEU-4) |
 
@@ -52,112 +52,38 @@ Notes:
   On real nuScenes data, `single` and `clusters` are additionally graded for correctness.
 - **The video fixture** (`tests/data/video/highway.mp4`) is real, committed motorway footage, so both
   the unit test and the docker smoke decode genuine content, not a synthetic file.
+- **Failure handling is tested directly:** the loader's resilience to missing cameras, empty scenes, and
+  cyclic or corrupt sample chains, and the accuracy gate failing on zero evaluated captions, both have
+  unit tests.
 
-## Per-test reference
+## What the unit tests cover
 
-Every test, by the layer that runs it, with the one thing it proves. The first two layers run on every
-push; the integration and real-data layers are opt-in or manual.
+The unit suite (every push, no model or network) pins down each load-bearing piece with deterministic
+assertions. By subject, with a representative example:
 
-### Unit (every push, `pytest -m "not integration"`)
+- **Keyframe selectors** (all three strategies): the exact selection math. E.g. `uniform` over 10 frames
+  picks indices `[0, 4, 9]`, `clusters` starts a new segment where frame-to-frame distance spikes, and
+  `single` takes the midpoint (plus edge cases: empty clips, short clips, `n=1`).
+- **Loaders** (nuScenes, image folder, video): each input turns into the right clips, and the nuScenes
+  loader survives real defects. E.g. a keyframe missing the camera is skipped, a cyclic sample chain is
+  broken, and one corrupt scene does not abort the run.
+- **Store (SQLite + FTS5)**: search returns the right row, and re-ingesting a scene replaces its row
+  rather than duplicating it.
+- **CLI**: the argparse to factory to pipeline to store path end to end (ingest, query, export-json),
+  including flag and environment precedence.
+- **Soundness checks** (`verify-db`): each check fails when it should. E.g. a missing scene, an empty
+  caption, a missing image file, or too little driving vocabulary each trips the right failure.
+- **Grounding scorer and gate** (`verify-accuracy`): precision, recall, and dominant-recall are computed
+  correctly, and the gate fails on a low precision floor, a baseline regression, or zero captions.
+- **BLEU and model sanity**: the hand-rolled BLEU behaves (identical scores 1.0, disjoint near 0, a
+  brevity penalty), and the sanity report passes on matching captions and fails on unrelated output.
+- **Pipeline and backend wiring**: one row per clip, a missing image is skipped rather than fatal, each
+  row carries its model provenance, and the Moondream backend loads lazily and is rejected for `clusters`.
 
-**Keyframe selection (`test_selectors.py`)**
-- `test_single_middle_picks_midpoint`: single/middle picks the temporal midpoint frame.
-- `test_single_empty_clip`: single returns nothing for a clip with no frames.
-- `test_clusters_split_on_distance`: clusters starts a new segment where frame-to-frame distance spikes.
-- `test_clusters_single_segment_when_uniform`: clusters yields one segment when all frames look alike.
-- `test_uniform_picks_evenly_spaced_endpoints`: uniform picks evenly-spaced indices including endpoints.
-- `test_uniform_n1_is_middle_with_no_suffix`: uniform n=1 collapses to the middle frame, no segment suffix.
-- `test_uniform_clamps_and_dedupes_on_short_clip`: uniform clamps N to the frame count and dedupes indices.
-- `test_uniform_empty_clip`: uniform returns nothing for an empty clip.
-- `test_uniform_rejects_zero`: uniform rejects n=0 as invalid.
-
-**Store: SQLite + FTS5 (`test_store_search.py`)**
-- `test_search_finds_the_right_row`: full-text search returns the row whose caption matches.
-- `test_upsert_is_idempotent`: re-upserting the same scene_id replaces rather than duplicates.
-- `test_row_shape_matches_scene_description`: a stored/returned row matches the SceneDescription shape.
-- `test_staged_publishes_only_on_finalize`: staged writes reach the final path only on finalize.
-- `test_staged_context_manager_finalizes_on_clean_exit`: context-manager exit publishes on a clean run.
-- `test_staged_failure_does_not_clobber_existing_db`: a failed run leaves any existing final DB intact.
-
-**CLI commands (`test_cli.py`)**
-- `test_ingest_then_query`: end-to-end ingest then query through the CLI.
-- `test_verbose_flag_accepted_after_subcommand`: -v works before or after the subcommand.
-- `test_ingest_uniform_selector_flags`: --selector uniform and --uniform-samples plumb through.
-- `test_ingest_with_stage_dir_publishes_db`: --stage-dir builds then publishes the database.
-- `test_export_json`: export-json dumps all rows to JSON.
-
-**Soundness checks, `verify-db` (`test_acceptance.py`)**
-- `test_passes_on_sound_db`: a well-formed database passes every check.
-- `test_fails_on_missing_scene`: coverage check fails when a scene is missing.
-- `test_fails_on_empty_description`: well-formed check fails on an empty caption.
-- `test_fails_on_missing_image_file`: file-existence check fails when an image is gone.
-- `test_fails_on_low_driving_vocabulary`: vocabulary check fails when too few captions mention driving terms.
-- `test_fts_roundtrip_not_truncated_by_common_word`: FTS round-trip finds every row even for a common word.
-- `test_scene_names_from_dataset`: reads scene names straight from scene.json.
-
-**Correctness scorer + gate, `verify-accuracy` (`test_grounding.py`)**
-- `test_family_and_caption_mapping`: maps caption words and GT boxes into object families.
-- `test_evaluate_precision_recall_and_dominant`: computes precision, recall, and dominant-recall correctly.
-- `test_rows_without_sample_token_are_skipped`: rows lacking a sample token are skipped, not errored.
-- `test_gate_passes_when_precise_and_no_regression`: gate passes when precise and not regressed vs baseline.
-- `test_gate_fails_on_precision_floor`: gate fails below the precision floor.
-- `test_gate_fails_on_dominant_recall_regression`: gate fails on a dominant-recall regression vs baseline.
-- `test_default_baseline_is_shipped_and_wellformed`: the shipped baseline file exists and is well-formed.
-
-**BLEU implementation (`test_bleu.py`)**
-- `test_identical_hypothesis_scores_one`: an identical hypothesis scores 1.0.
-- `test_disjoint_hypothesis_scores_near_zero`: a fully disjoint hypothesis scores near zero.
-- `test_partial_overlap_is_between`: partial overlap scores between 0 and 1.
-- `test_brevity_penalty_punishes_short_hypotheses`: the brevity penalty lowers too-short hypotheses.
-- `test_multiple_references_take_the_best`: with several references, the best match counts.
-
-**Model-sanity report, `bleu-sanity` (`test_sanity.py`)**
-- `test_passes_when_captions_match_references`: sanity passes when captions match references above the floor.
-- `test_fails_when_model_output_is_unrelated`: sanity fails when output is unrelated (near-zero BLEU).
-
-**Video loader (`test_dataset_video.py`)**
-- `test_fixture_exists`: the committed highway.mp4 fixture is present.
-- `test_samples_keyframes_and_writes_them`: decodes and samples keyframes, writing them out.
-- `test_stride_controls_keyframe_count`: the sampling stride controls how many keyframes are produced.
-- `test_directory_input_discovers_the_video`: pointing at a directory discovers the video file.
-
-**Image-folder loader (`test_dataset_imagefolder.py`)**
-- `test_one_clip_per_image_sorted`: one clip per image, in sorted order.
-- `test_recursive_discovery`: discovers images in nested subdirectories.
-
-**nuScenes loader, fake devkit (`test_dataset_nuscenes.py`)**
-- `test_iter_clips_yields_one_clip_per_scene`: yields one clip per scene.
-- `test_walks_the_full_keyframe_chain`: walks the full next-linked keyframe chain.
-
-**Pipeline wiring (`test_pipeline.py`)**
-- `test_single_mode_one_row_per_clip`: single mode writes exactly one row per clip.
-- `test_missing_image_is_skipped_not_fatal`: a missing image is skipped, not fatal to the run.
-
-**Moondream backend wiring (`test_vlm_moondream.py`)**
-- `test_construction_is_lazy_no_weights_loaded`: constructing the backend loads no weights (lazy).
-- `test_describe_uses_encode_then_answer`: describe uses the encode-then-answer path.
-- `test_clusters_rejects_moondream_backend`: pairing clusters with moondream fails fast with a clear message.
-
-### docker-smoke (every push)
-
-Builds the shipping image and runs the real commands inside it, no dataset needed:
-- **doctor**: dependency health inside the image (imports, SQLite FTS5, cached BLIP weights).
-- **fake-backend ingest + query**: a real ingest and query over generated images.
-- **video decode + all selectors**: decodes the committed highway.mp4 and runs single, uniform, and
-  clusters, then queries the result.
-
-### Integration (opt-in, `pytest -m integration`)
-
-Real-model checks that run in the manual tier rather than on every push:
-- `test_blip_integration.py::test_blip_captions_and_embeds`: the real BLIP model captions and embeds an image.
-- `test_coco_sanity.py::test_blip_bleu_on_coco_micro_set`: real BLIP scores acceptable BLEU-4 on a COCO micro-set.
-
-### Real-data acceptance (manual, `nuscenes-e2e`)
-
-Full acceptance on the real nuScenes v1.0-mini dataset with the real BLIP model, via the CLI gates:
-- **`verify-db`**: the soundness checks above, run on the real produced database.
-- **`verify-accuracy`**: object-grounding correctness on single and clusters (see next section).
-- **`bleu-sanity`**: BLIP BLEU-4 on a small official COCO set against a floor.
+The higher layers are summarized in the coverage matrix above: `docker-smoke` builds the image and runs
+ingest, query, and all three selectors on the committed video clip every push; the opt-in integration
+tier exercises the real BLIP model; and the manual real-data acceptance runs `verify-db`,
+`verify-accuracy`, and `bleu-sanity` on real nuScenes (detailed below).
 
 ## How correctness is measured (`verify-accuracy`)
 
@@ -173,9 +99,9 @@ names to the ground-truth 3D boxes actually visible in that frame:
   gate fails if metrics regress against it. `clusters` has no committed baseline, so it is gated on the
   precision floor only (`--no-baseline`, with a slightly lower `--min-precision 0.8` for margin).
 
-This is trustworthy because, with weights and dependencies pinned, BLIP's beam search is deterministic
-(two independent real runs produced byte-identical captions), so the metrics are reproducible and a
-regression reliably signals a dependency or model change, not noise.
+This is trustworthy because, for a fixed BLIP revision on the same CPU stack, its beam search is
+deterministic (two independent real runs produced identical captions), so the metrics are reproducible
+and a regression reliably signals a dependency or model change, not noise.
 
 ## How model health is measured (`bleu-sanity`)
 

@@ -138,7 +138,12 @@ class Runner:
     def vlm(self, args: list[str], *, mount_data: bool = False,
             mounts: list[tuple[str, str]] | None = None) -> subprocess.CompletedProcess:
         if self.mode == "docker":
-            cmd = ["docker", "run", "--rm", "-v", f"{self.out_dir}:/out"]
+            cmd = ["docker", "run", "--rm"]
+            # The image runs as a non-root user; on a POSIX host run it as the
+            # invoking user so it can write to the host-owned output mount.
+            if hasattr(os, "getuid"):
+                cmd += ["--user", f"{os.getuid()}:{os.getgid()}"]
+            cmd += ["-v", f"{self.out_dir}:/out"]
             if mount_data:
                 cmd += ["-v", f"{self.dataroot}:/data:ro"]
             for host, container in (mounts or []):
