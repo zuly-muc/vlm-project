@@ -1,16 +1,14 @@
 # vlm-project
 
-> **Abstract.** `vlm-project` turns footage into a **searchable database of scene descriptions**. Point
-> it at a source (the nuScenes driving dataset, a folder of images, or video files) and it captions a
-> representative frame of each clip with a vision-language model, storing every description in a local
-> SQLite database with full-text search. One command ingests, another searches. It runs fully offline
-> on CPU inside a container, and the database is a single portable file you can query, copy, or archive.
-
 ![A nuScenes frame captioned by BLIP](docs/assets/hero.png)
 
-*An example result: a nuScenes v1.0-mini front-camera frame, described by the local BLIP model.*
+## Abstract
 
-## What it is
+`vlm-project` is an app that turns footage into a **searchable database of scene descriptions**. Simply Point it at a source (the nuScenes driving dataset, a folder of images, or video files) and it captions a representative frame of each clip with a vision-language model, storing every description in a local
+SQLite database with full-text search. One command ingests, another searches. It runs **fully offline on CPU** inside a container, and the database is a single portable file you can query, copy, or archive.
+
+
+## Overall flow
 
 - **Ingests** the nuScenes dataset, a folder of images, or video files (`.mp4/.mov/.avi/.mkv`), with no code change.
 - **Selects** the frame(s) to describe per clip: one representative frame, a few evenly-spaced, or content-aware sub-scenes.
@@ -61,7 +59,7 @@ docker run --rm -v "$PWD/out:/out" -e DB=/out/demo.db vlm-project query car
 
 Results land in `./out/demo.db` on your machine, an ordinary SQLite file.
 
-> **Windows (PowerShell):** use `${PWD}` and Windows source paths (for example `-v ${PWD}\pics:/data:ro`), or run inside WSL.
+> Note: **Windows (PowerShell):** use `${PWD}` and Windows source paths (for example `-v ${PWD}\pics:/data:ro`), or run inside WSL.
 
 **Full run on nuScenes:** download **nuScenes v1.0-mini** (~4 GB, free account/EULA) and extract it so
 the root holds `samples/ sweeps/ maps/ v1.0-mini/`, then:
@@ -72,8 +70,6 @@ docker run --rm -v /path/to/nuscenes:/data:ro -v "$PWD/out:/out" \
 docker run --rm -v "$PWD/out:/out" -e DB=/out/scenes.db vlm-project query "pedestrian crossing"
 ```
 
-BLIP captions a frame in roughly **2 to 9 seconds on CPU** (the 10-scene mini set is about 15 minutes).
-
 **Local install (development):**
 
 ```bash
@@ -81,11 +77,6 @@ pip install -e ".[dev]"     # add ".[video]" for local video decoding
 pytest                      # fast unit suite: no dataset, model, or network
 vlm-project ingest --dataroot ./data --db out/scenes.db -v
 ```
-
-**Configuration** is set by environment variables, or the matching CLI flag which wins. The common ones
-are `LOADER`, `DATAROOT`, `SELECTOR`, `VLM_BACKEND`, and `DB` (all shown in the examples above). The full
-reference, with every variable, flag, default, and its accepted values, is in
-**[`docs/CONFIGURATION.md`](docs/CONFIGURATION.md)**.
 
 ## Deploy
 
@@ -108,3 +99,11 @@ against nuScenes ground-truth boxes (`verify-accuracy`), and a COCO BLEU-4 model
 
 The design decisions and trade-offs are in **[`docs/DESIGN.md`](docs/DESIGN.md)**; the test strategy and
 coverage matrix are in **[`docs/TEST_PLAN.md`](docs/TEST_PLAN.md)**.
+
+## Configuration
+
+**Configuration** is set by environment variables, or the matching CLI flag which wins. The common ones
+are `LOADER`, `DATAROOT`, `SELECTOR`, `VLM_BACKEND`, and `DB` (all shown in the examples above). The full
+reference, with every variable, flag, default, and its accepted values, is in
+**[`docs/CONFIGURATION.md`](docs/CONFIGURATION.md)**.
+
