@@ -17,7 +17,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.12"        # match the Docker image interpreter
           cache: pip
       - name: Install (no heavy deps) + test tooling
         run: |
@@ -44,13 +44,12 @@ jobs:
       - name: Fake-backend ingest + query (no dataset needed)
         run: |
           mkdir -p out imgs
-          python - <<'PY'
-          from PIL import Image
-          for i in range(3):
-              Image.new("RGB", (48, 36), (i*60, 40, 90)).save(f"imgs/img{i}.jpg")
-          PY
+          # Generate the test images with the image's OWN Pillow (the runner may
+          # not have Pillow installed); --entrypoint python overrides vlm-project.
+          docker run --rm -v "$PWD/imgs:/imgs" --entrypoint python vlm-project -c \
+            "from PIL import Image; [Image.new('RGB',(48,36),(i*60,40,90)).save(f'/imgs/img{i}.jpg') for i in range(3)]"
           docker run --rm -v "$PWD/imgs:/imgs:ro" -v "$PWD/out:/out" \
-            -e LOADER=imagefolder -e DATAROOT=/imgs -e DB=/out/s.db \
+            -e LOADER=imagefolder -e DATAROOT=/imgs -e DB=/out/s.db -e VLM_BACKEND=fake \
             vlm-project ingest -v
           docker run --rm -v "$PWD/out:/out" -e DB=/out/s.db vlm-project query image
 
@@ -77,9 +76,15 @@ jobs:
         run: bash scripts/test_vlm_app_production.sh --mode docker --skip-build
         env:
           NUSCENES_DIR: /home/runner/nuscenes
-      - name: Upload produced databases
+      - name: Upload produced databases + accuracy report
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: scene-databases
-          path: out/*.db
+          path: |
+            out/*.db
+            out/accuracy.json
+      # NB: the acceptance run's final stage (model-sanity) fetches a small
+      # official COCO set on the host and scores BLIP BLEU-4 inside the image, so
+      # model regression is covered here without a separate job. It skips
+      # gracefully if COCO can't be fetched (offline).

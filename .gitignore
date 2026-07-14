@@ -2,6 +2,9 @@
 data/
 *.tgz
 
+# Fetched COCO model-sanity micro-set (pulled from official source, not vendored)
+tests/data/coco_sanity/
+
 # Outputs
 out/
 *.db

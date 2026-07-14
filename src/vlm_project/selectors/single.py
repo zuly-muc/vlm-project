@@ -1,7 +1,7 @@
 """Single-keyframe selector: one representative frame per clip.
 
-This is the default and matches the literal task ("pick a representative
-keyframe"). Two strategies:
+This is the default and the core case ("pick a representative keyframe").
+Two strategies:
 
 * ``middle``   -- the temporal midpoint. Zero image decoding; robust default.
 * ``sharpest`` -- the least-blurry frame by variance-of-Laplacian. Decodes each

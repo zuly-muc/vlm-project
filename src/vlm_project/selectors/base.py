@@ -3,7 +3,7 @@
 Selecting *which* frame(s) of a clip to describe is a concern distinct from
 loading the clip. A selector maps one ClipItem to one or more SceneItems:
 
-* ``single``   -> exactly one SceneItem (one row per clip; the literal task).
+* ``single``   -> exactly one SceneItem (one row per clip; the core case).
 * ``clusters`` -> a few SceneItems, one per temporally-distinct segment.
 
 Because it operates on ClipItems, the same selector serves nuScenes clips and

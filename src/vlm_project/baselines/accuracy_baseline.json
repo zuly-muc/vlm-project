@@ -1,0 +1,15 @@
+{
+  "description": "Object-grounding baseline for BLIP-base single-frame captions over nuScenes v1.0-mini (CAM_FRONT). Regenerate with: vlm-project verify-accuracy --db out/scenes.db --dataroot <nuscenes> --write-baseline",
+  "model": "blip-base",
+  "dataset": "nuscenes v1.0-mini",
+  "selector": "single/middle",
+  "metrics": {
+    "precision": 1.0,
+    "recall": 0.1667,
+    "f1": 0.2857,
+    "dominant_recall": 0.5,
+    "dominant_hits": 5,
+    "dominant_total": 10,
+    "n_captions": 10
+  }
+}

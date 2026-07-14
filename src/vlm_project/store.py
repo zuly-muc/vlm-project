@@ -13,6 +13,8 @@ without the rowid-churn footguns of external-content triggers.
 from __future__ import annotations
 
 import json
+import os
+import shutil
 import sqlite3
 from pathlib import Path
 
@@ -40,17 +42,62 @@ CREATE VIRTUAL TABLE IF NOT EXISTS descriptions_fts
 
 
 class SceneStore:
-    """A thin, well-typed wrapper around one SQLite database file."""
+    """A thin, well-typed wrapper around one SQLite database file.
 
-    def __init__(self, db_path: str | Path):
-        self.db_path = str(db_path)
-        parent = Path(self.db_path).parent
-        if parent and not parent.exists():
-            parent.mkdir(parents=True, exist_ok=True)
+    ``stage_dir`` opts into *staged* writes: the database is built on a
+    container-local scratch path and only moved to ``db_path`` when the store is
+    finalized (context-manager exit on a clean run). This keeps the many small
+    ``ingest`` commits off slow/locking bind mounts (e.g. a Windows host volume
+    under Docker Desktop / WSL2) and lands the finished file in a single move.
+    Read paths (``query``/``export-json``) open ``db_path`` directly and never
+    stage.
+    """
+
+    def __init__(self, db_path: str | Path, *, stage_dir: str | Path | None = None):
+        self.final_path = str(db_path)
+        self._staged = stage_dir is not None
+
+        if self._staged:
+            stage = Path(stage_dir)
+            stage.mkdir(parents=True, exist_ok=True)
+            self.db_path = str(stage / Path(self.final_path).name)
+        else:
+            self.db_path = self.final_path
+            parent = Path(self.db_path).parent
+            if parent and not parent.exists():
+                parent.mkdir(parents=True, exist_ok=True)
+
         self.conn = sqlite3.connect(self.db_path)
         self.conn.row_factory = sqlite3.Row
         self.conn.executescript(_SCHEMA)
         self.conn.commit()
+
+    # -- lifecycle ------------------------------------------------------------
+
+    def finalize(self) -> None:
+        """Close the connection and, if staged, publish the DB to ``final_path``.
+
+        The staging dir (local scratch) and the final path (often a bind mount)
+        are usually on different filesystems, so ``os.replace`` across them would
+        raise. We copy into the final *directory* first, then ``os.replace`` the
+        temp file onto the destination — which is atomic within that directory's
+        filesystem, so readers never observe a half-written DB.
+        """
+        self.conn.close()
+        if not self._staged:
+            return
+
+        final = Path(self.final_path)
+        if final.parent and not final.parent.exists():
+            final.parent.mkdir(parents=True, exist_ok=True)
+
+        tmp_final = final.with_name(final.name + ".tmp")
+        shutil.copyfile(self.db_path, tmp_final)
+        os.replace(tmp_final, final)
+        try:
+            os.remove(self.db_path)
+        except OSError:
+            pass  # scratch cleanup is best-effort; the published DB is what matters
 
     # -- writes ---------------------------------------------------------------
 
@@ -133,5 +180,9 @@ class SceneStore:
     def __enter__(self) -> SceneStore:
         return self
 
-    def __exit__(self, *exc) -> None:
-        self.close()
+    def __exit__(self, exc_type, exc, tb) -> None:
+        if exc_type is not None:
+            # Failed run: never publish a partial DB over an existing good one.
+            self.close()
+            return
+        self.finalize()

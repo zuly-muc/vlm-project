@@ -59,6 +59,40 @@ def test_verbose_flag_accepted_after_subcommand(tmp_path: Path, capsys):
     assert rc == 0
 
 
+def test_ingest_uniform_selector_flags(tmp_path: Path, capsys):
+    # Exercise the --selector uniform / --uniform-samples plumbing end to end.
+    # (imagefolder yields one-frame clips, so this is one scene per image.)
+    images = tmp_path / "imgs"
+    images.mkdir()
+    _seed_images(images, n=2)
+    db = tmp_path / "scenes.db"
+
+    rc = main(["ingest", "--loader", "imagefolder", "--backend", "fake",
+               "--selector", "uniform", "--uniform-samples", "3",
+               "--dataroot", str(images), "--db", str(db)])
+    assert rc == 0
+    assert "Ingested 2 scene(s)" in capsys.readouterr().out
+
+
+def test_ingest_with_stage_dir_publishes_db(tmp_path: Path, capsys):
+    images = tmp_path / "imgs"
+    images.mkdir()
+    _seed_images(images, n=2)
+    db = tmp_path / "out" / "scenes.db"
+    stage = tmp_path / "stage"
+
+    rc = main(["ingest", "--loader", "imagefolder", "--backend", "fake",
+               "--dataroot", str(images), "--db", str(db), "--stage-dir", str(stage)])
+    assert rc == 0
+    # Final DB exists at the requested path; scratch is cleaned up.
+    assert db.exists()
+    assert not (stage / "scenes.db").exists()
+
+    rc = main(["query", "image", "--db", str(db)])
+    assert rc == 0
+    assert "img0" in capsys.readouterr().out
+
+
 def test_export_json(tmp_path: Path, capsys):
     images = tmp_path / "imgs"
     images.mkdir()

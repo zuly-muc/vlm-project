@@ -6,8 +6,15 @@
 # Regenerate with:  pip install -e . && pip freeze > requirements.lock
 # (kept hand-curated here to the direct deps that matter for the image).
 
-nuscenes-devkit==1.1.11
+nuscenes-devkit==1.2.0
 transformers==4.44.2
 torch==2.4.1
 Pillow==10.4.0
 numpy==1.26.4
+
+# Transitive deps of nuscenes-devkit, pinned to versions that ship cp312 wheels.
+# nuscenes-devkit 1.1.x dragged in Shapely<2.0 and matplotlib<3.6, which have no
+# wheels for modern Python on Linux and fail to compile in the slim image; 1.2.0
+# allows Shapely 2.x / matplotlib 3.x, which install from wheels (no toolchain).
+shapely==2.0.7
+matplotlib==3.11.0
